@@ -13,18 +13,23 @@ const app = express();
 
 // CORS — allow requests from the frontend domain
 const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:5173',
+  'http://localhost:5173',
   'http://localhost:3000',
-  'https://run-os-backend.vercel.app'
 ];
+
+// Add any FRONTEND_URL from env (supports comma-separated list for multiple URLs)
+if (process.env.FRONTEND_URL) {
+  process.env.FRONTEND_URL.split(',').map(u => u.trim()).forEach(u => allowedOrigins.push(u));
+}
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like curl / Postman) or from the allowed list
+    // Allow requests with no origin (curl, Postman, SSR) or from the allowed list
     if (!origin || allowedOrigins.some(o => origin.startsWith(o))) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      // Return false (block) instead of throwing — avoids a 500 Internal Server Error
+      callback(null, false);
     }
   },
   credentials: true,
