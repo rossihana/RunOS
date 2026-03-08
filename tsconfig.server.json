@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "lib": ["ES2022"],
+    "skipLibCheck": true,
+    "allowJs": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "strict": false,
+    "types": ["node", "express", "cookie-parser", "jsonwebtoken", "better-sqlite3"]
+  },
+  "include": ["server.ts", "server/**/*.ts"]
+}
