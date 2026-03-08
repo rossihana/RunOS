@@ -14,7 +14,7 @@ const app = express();
 // CORS — allow requests from the frontend domain
 const allowedOrigins = [
   'http://localhost:5173',
-  'http://localhost:3000',
+  'http://localhost:3000','https://runos.vercel.app',
 ];
 
 // Add any FRONTEND_URL from env (supports comma-separated list for multiple URLs)
