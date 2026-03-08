@@ -326,7 +326,7 @@ export default function ActivityDetail() {
                                    <Tooltip 
                                       contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#fff', borderRadius: '8px' }}
                                       labelFormatter={(val) => `${val} km`}
-                                       formatter={(val: number | undefined) => [`${Math.round(val ?? 0)} m`, 'Elevation'] as any}
+                                       formatter={(val: any) => [`${Math.round(val ?? 0)} m`, 'Elevation'] as any}
                                    />
                                    <Area type="monotone" dataKey="altitude" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorAlt)" isAnimationActive={false} />
                                </AreaChart>
@@ -378,7 +378,7 @@ export default function ActivityDetail() {
                                    <Tooltip 
                                       contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#fff', borderRadius: '8px' }}
                                       labelFormatter={(val) => `${val} km`}
-                                       formatter={(val: number | undefined) => [`${Math.round(val ?? 0)} bpm`, 'Heart Rate'] as any}
+                                       formatter={(val: any) => [`${Math.round(val ?? 0)} bpm`, 'Heart Rate'] as any}
                                    />
                                    <Line type="monotone" dataKey="hr" stroke="#f43f5e" strokeWidth={2} dot={false} isAnimationActive={false} />
                                </LineChart>
