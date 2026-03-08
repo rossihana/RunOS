@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "start": "start cmd /k \"npm run dev:backend\" & start cmd /k \"npm run dev:frontend\"",
+    "start": "npx -y concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev": "node -e \"console.log('\\n\\n\\x1b[36m➜\\x1b[0m Buka 2 terminal baru:\\n\\x1b[33m1. Terminal A:\\x1b[0m npm run dev:backend\\n\\x1b[33m2. Terminal B:\\x1b[0m npm run dev:frontend\\n\\n')\"",
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
