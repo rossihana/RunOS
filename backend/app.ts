@@ -11,27 +11,10 @@ import { initDb, pool } from './src/db.js';
 
 const app = express();
 
-// CORS — allow requests from the frontend domain
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:3000','https://runos.vercel.app',
-];
-
-// Add any FRONTEND_URL from env (supports comma-separated list for multiple URLs)
-if (process.env.FRONTEND_URL) {
-  process.env.FRONTEND_URL.split(',').map(u => u.trim()).forEach(u => allowedOrigins.push(u));
-}
-
+// CORS — allow all origins (data is protected by JWT auth, not by CORS)
+// origin: true echoes back the requesting origin, required for credentials: true
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (curl, Postman, SSR) or from the allowed list
-    if (!origin || allowedOrigins.some(o => origin.startsWith(o))) {
-      callback(null, true);
-    } else {
-      // Return false (block) instead of throwing — avoids a 500 Internal Server Error
-      callback(null, false);
-    }
-  },
+  origin: true,
   credentials: true,
 }));
 
