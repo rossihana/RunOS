@@ -6,7 +6,8 @@ import authRoutes from './src/routes/auth.js';
 import activitiesRoutes from './src/routes/activities.js';
 import racesRoutes from './src/routes/races.js';
 import analyticsRoutes from './src/routes/analytics.js';
-import { initDb } from './src/db.js';
+import { initDb, pool } from './src/db.js';
+
 
 const app = express();
 
@@ -46,8 +47,13 @@ app.use('/api/activities', activitiesRoutes);
 app.use('/api/races', racesRoutes);
 app.use('/api/analytics', analyticsRoutes);
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', db: dbReady });
+app.get('/api/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', db: true });
+  } catch (e: any) {
+    res.json({ status: 'ok', db: false, error: e.message });
+  }
 });
 
 export default app;
