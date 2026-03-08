@@ -44,6 +44,8 @@ export async function initDb() {
       start_date TIMESTAMP,
       map_polyline TEXT,
       details_fetched BOOLEAN DEFAULT FALSE,
+      splits JSONB,
+      streams JSONB,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -72,12 +74,22 @@ export async function initDb() {
     );
   `);
 
-  // Add details_fetched column to existing activities table if it doesn't exist
-  await pool.query(`
-    ALTER TABLE activities ADD COLUMN IF NOT EXISTS details_fetched BOOLEAN DEFAULT FALSE;
-    ALTER TABLE activities ADD COLUMN IF NOT EXISTS splits JSONB;
-    ALTER TABLE activities ADD COLUMN IF NOT EXISTS streams JSONB;
-  `);
+  // Add columns to existing tables if they don't exist — each in its own try/catch
+  // so one failure doesn't block the others
+  const alterations = [
+    `ALTER TABLE activities ADD COLUMN IF NOT EXISTS details_fetched BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE activities ADD COLUMN IF NOT EXISTS splits JSONB`,
+    `ALTER TABLE activities ADD COLUMN IF NOT EXISTS streams JSONB`,
+  ];
+  for (const sql of alterations) {
+    try {
+      await pool.query(sql);
+    } catch (e) {
+      // Column might already exist with right type — safe to ignore
+      console.warn('ALTER TABLE skipped:', e instanceof Error ? e.message : e);
+    }
+  }
 
   console.log('Database initialized');
 }
+

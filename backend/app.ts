@@ -14,6 +14,7 @@ const app = express();
 const allowedOrigins = [
   process.env.FRONTEND_URL || 'http://localhost:5173',
   'http://localhost:3000',
+  'https://run-os-backend.vercel.app'
 ];
 
 app.use(cors({
@@ -32,9 +33,13 @@ app.set('trust proxy', 1);
 app.use(express.json());
 app.use(cookieParser());
 
-// Initialize DB then register routes
+// Initialize DB — must succeed before routes work.
+// In serverless, this runs per cold-start. We catch errors so the function
+// can still respond (e.g. with a 503) rather than crashing entirely.
 let dbReady = false;
-initDb().then(() => { dbReady = true; });
+initDb()
+  .then(() => { dbReady = true; })
+  .catch((err) => { console.error('initDb failed:', err); });
 
 app.use('/api/auth', authRoutes);
 app.use('/api/activities', activitiesRoutes);
@@ -46,3 +51,4 @@ app.get('/api/health', (req, res) => {
 });
 
 export default app;
+
