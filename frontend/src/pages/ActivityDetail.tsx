@@ -186,9 +186,9 @@ export default function ActivityDetail() {
   }
 
   // Pace Chart Tooltip Formatter
-  const paceTooltipFormatter = (value: number) => {
-    const mins = Math.floor(value / 60);
-    const secs = Math.floor(value % 60);
+  const paceTooltipFormatter = (value: number | undefined) => {
+    const mins = Math.floor((value ?? 0) / 60);
+    const secs = Math.floor((value ?? 0) % 60);
     return [`${mins}:${secs.toString().padStart(2, '0')} /km`, 'Pace'];
   };
 
@@ -326,7 +326,7 @@ export default function ActivityDetail() {
                                    <Tooltip 
                                       contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#fff', borderRadius: '8px' }}
                                       labelFormatter={(val) => `${val} km`}
-                                      formatter={(val: number) => [`${Math.round(val)} m`, 'Elevation']}
+                                       formatter={(val: number | undefined) => [`${Math.round(val ?? 0)} m`, 'Elevation'] as any}
                                    />
                                    <Area type="monotone" dataKey="altitude" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorAlt)" isAnimationActive={false} />
                                </AreaChart>
@@ -354,7 +354,7 @@ export default function ActivityDetail() {
                                    <Tooltip 
                                       contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#fff', borderRadius: '8px' }}
                                       labelFormatter={(val) => `${val} km`}
-                                      formatter={paceTooltipFormatter}
+                                       formatter={paceTooltipFormatter as any}
                                    />
                                    <Line type="monotone" dataKey="pace" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false} />
                                </LineChart>
@@ -378,7 +378,7 @@ export default function ActivityDetail() {
                                    <Tooltip 
                                       contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#fff', borderRadius: '8px' }}
                                       labelFormatter={(val) => `${val} km`}
-                                      formatter={(val: number) => [`${Math.round(val)} bpm`, 'Heart Rate']}
+                                       formatter={(val: number | undefined) => [`${Math.round(val ?? 0)} bpm`, 'Heart Rate'] as any}
                                    />
                                    <Line type="monotone" dataKey="hr" stroke="#f43f5e" strokeWidth={2} dot={false} isAnimationActive={false} />
                                </LineChart>
