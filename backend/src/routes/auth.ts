@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { query } from '../db';
+import { query } from '../db.js';
 import jwt from 'jsonwebtoken';
 import axios from 'axios';
-import { AuthRequest, authenticate } from '../middleware/auth';
+import { AuthRequest, authenticate } from '../middleware/auth.js';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-for-dev';

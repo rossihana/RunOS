@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { query } from '../db';
-import { AuthRequest, authenticate } from '../middleware/auth';
+import { query } from '../db.js';
+import { AuthRequest, authenticate } from '../middleware/auth.js';
 import axios from 'axios';
-import { getValidAccessToken } from '../services/strava';
+import { getValidAccessToken } from '../services/strava.js';
 
 const router = Router();
 

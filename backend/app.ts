@@ -2,11 +2,11 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import authRoutes from './src/routes/auth';
-import activitiesRoutes from './src/routes/activities';
-import racesRoutes from './src/routes/races';
-import analyticsRoutes from './src/routes/analytics';
-import { initDb } from './src/db';
+import authRoutes from './src/routes/auth.js';
+import activitiesRoutes from './src/routes/activities.js';
+import racesRoutes from './src/routes/races.js';
+import analyticsRoutes from './src/routes/analytics.js';
+import { initDb } from './src/db.js';
 
 const app = express();
 

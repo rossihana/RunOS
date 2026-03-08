@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { query } from '../db';
-import { AuthRequest, authenticate } from '../middleware/auth';
+import { query } from '../db.js';
+import { AuthRequest, authenticate } from '../middleware/auth.js';
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format, subWeeks, subMonths } from 'date-fns';
 
 const router = Router();

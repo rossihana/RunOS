@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { query } from '../db';
+import { query } from '../db.js';
 
 const STRAVA_CLIENT_ID = process.env.STRAVA_CLIENT_ID;
 const STRAVA_CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
