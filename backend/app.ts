@@ -46,3 +46,12 @@ app.get('/api/health', async (req, res) => {
 
 export default app;
 
+// In local development, start the server
+// Vercel sets the VERCEL environment variable, so this won't run on Vercel
+if (!process.env.VERCEL && process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
