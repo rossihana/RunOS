@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { format } from 'date-fns';
-import { ArrowLeft, Clock, MapPin, Activity as ActivityIcon, HeartPulse, Mountain, TrendingUp, Award } from 'lucide-react';
+import { ArrowLeft, Clock, MapPin, Activity as ActivityIcon, HeartPulse, Mountain, TrendingUp, Award, Sparkles, Wand2, Footprints } from 'lucide-react';
 import api from '../services/api';
 import { decodePolyline } from '../utils/polyline';
+import ReactMarkdown from 'react-markdown';
 
 // Mapping
 import { MapContainer, TileLayer, Polyline as LeafletPolyline } from 'react-leaflet';
@@ -50,16 +51,21 @@ interface ActivityDetailData {
   max_heartrate: number | null;
   elevation_gain: number;
   start_date: string;
+  start_date_local: string;
   map_polyline: string | null;
   achieved_prs: PREffort[];
   splits: Split[] | null;
   streams: Record<string, StreamData> | null;
+  cadence: number | null;
 }
 
 export default function ActivityDetail() {
   const { id } = useParams<{ id: string }>();
   const [activity, setActivity] = useState<ActivityDetailData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [showAIModal, setShowAIModal] = useState(false);
 
   useEffect(() => {
     const fetchActivity = async () => {
@@ -74,6 +80,20 @@ export default function ActivityDetail() {
     };
     fetchActivity();
   }, [id]);
+
+  const handleAnalyze = async () => {
+    setAnalyzing(true);
+    setShowAIModal(true);
+    try {
+      const response = await api.post(`/ai/activity-analysis/${id}`);
+      setAiAnalysis(response.data.analysis);
+    } catch (err) {
+      console.error('AI Analysis failed:', err);
+      setAiAnalysis('Maaf, analisa gagal dilakukan. Silakan coba lagi nanti.');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   const formatDuration = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -226,14 +246,69 @@ export default function ActivityDetail() {
         {/* Header Content overlay on Map (pointer-events-none so we can click the map underneath) */}
         <div className="absolute bottom-6 left-0 right-0 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto pointer-events-none">
            {/* Semi-transparent backdrop for text readability over the interactive map */}
-           <div className="inline-block p-4 rounded-xl bg-white/80 dark:bg-black/80 backdrop-blur-md shadow-lg pointer-events-auto border border-zinc-200/50 dark:border-zinc-800/50">
-               <h1 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white">{activity.name}</h1>
-               <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mt-1">
-                 {format(new Date(activity.start_date), 'EEEE, MMMM d, yyyy • h:mm a')}
-               </p>
+           <div className="flex items-center justify-between p-4 rounded-xl bg-white/80 dark:bg-black/80 backdrop-blur-md shadow-lg pointer-events-auto border border-zinc-200/50 dark:border-zinc-800/50 min-w-0">
+               <div className="min-w-0">
+                  <h1 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white truncate">{activity.name}</h1>
+                  <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mt-1">
+                    {format(new Date(activity.start_date_local), 'EEEE, MMMM d, yyyy • h:mm a')}
+                  </p>
+               </div>
+               <button
+                  onClick={handleAnalyze}
+                  className="ml-4 shrink-0 p-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-2 font-bold text-sm"
+               >
+                 <Sparkles className="w-4 h-4 fill-white" />
+                 <span className="hidden sm:inline">Analyze Run</span>
+               </button>
            </div>
         </div>
       </div>
+
+      {/* AI Analysis Modal */}
+      {showAIModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-zinc-900 w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-gradient-to-r from-orange-50 to-white dark:from-orange-900/10 dark:to-zinc-900">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-orange-100 dark:bg-orange-900/50 rounded-xl text-orange-600">
+                  <Wand2 className="w-5 h-5" />
+                </div>
+                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">AI Coach Deep Analysis</h3>
+              </div>
+              <button 
+                onClick={() => setShowAIModal(false)}
+                className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors text-zinc-500"
+              >
+                Tutup
+              </button>
+            </div>
+            <div className="p-8 max-h-[60vh] overflow-y-auto">
+              {analyzing ? (
+                <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                  <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
+                  <p className="text-zinc-500 font-medium animate-pulse">Menghitung efisiensi dan biomekanik...</p>
+                </div>
+              ) : (
+                <div className="prose dark:prose-invert max-w-none text-zinc-800 dark:text-zinc-200 leading-relaxed">
+                  <div className="prose dark:prose-invert prose-sm max-w-none">
+                    <ReactMarkdown>{aiAnalysis || ''}</ReactMarkdown>
+                  </div>
+                </div>
+              )}
+            </div>
+            {!analyzing && (
+              <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 border-t border-zinc-100 dark:border-zinc-800 flex justify-end">
+                <button 
+                  onClick={() => setShowAIModal(false)}
+                  className="px-6 py-2 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition-opacity"
+                >
+                  Selesai
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Trophy / PR Banner */}
@@ -299,37 +374,75 @@ export default function ActivityDetail() {
                  {Math.round(activity.elevation_gain || 0)} <span className="text-base font-normal text-zinc-500">m</span>
               </div>
            </div>
+
+           {/* Cadence */}
+           {activity.cadence && (
+             <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-5 shadow-sm">
+               <div className="flex items-center text-zinc-500 dark:text-zinc-400 mb-3">
+                 <Footprints className="w-4 h-4 mr-2" />
+                 <span className="text-sm font-medium">Cadence</span>
+               </div>
+               <div className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white">
+                 {activity.cadence} <span className="text-base font-normal text-zinc-500">spm</span>
+               </div>
+               <div className={`mt-2 text-xs font-semibold px-2 py-0.5 rounded-full inline-block ${
+                 activity.cadence >= 180 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                 activity.cadence >= 165 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+               }`}>
+                 {activity.cadence >= 180 ? 'Optimal' : activity.cadence >= 165 ? 'Cukup Baik' : 'Perlu Ditingkatkan'}
+               </div>
+             </div>
+           )}
+
+           {/* Stride Length */}
+           {activity.cadence && activity.average_speed && (() => {
+             // stride = speed(m/s) / (cadence/60) — cadence in SPM full
+             const strideM = (activity.average_speed / (activity.cadence / 60)).toFixed(2);
+             return (
+               <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-5 shadow-sm">
+                 <div className="flex items-center text-zinc-500 dark:text-zinc-400 mb-3">
+                   <TrendingUp className="w-4 h-4 mr-2" />
+                   <span className="text-sm font-medium">Stride</span>
+                 </div>
+                 <div className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white">
+                   {strideM} <span className="text-base font-normal text-zinc-500">m</span>
+                 </div>
+                 <div className={`mt-2 text-xs font-semibold px-2 py-0.5 rounded-full inline-block ${
+                   parseFloat(strideM) >= 1.2 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                   parseFloat(strideM) >= 0.9 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                   'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                 }`}>
+                   {parseFloat(strideM) >= 1.2 ? 'Panjang' : parseFloat(strideM) >= 0.9 ? 'Normal' : 'Pendek'}
+                 </div>
+               </div>
+             );
+           })()}
         </div>
 
         {/* Charts & Splits Section */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left Column: Charts */}
             <div className="lg:col-span-2 space-y-6">
-               {/* Elevation Chart */}
-               {chartData.length > 0 && chartData.some(d => d.altitude !== null) && (
+               {/* HR Chart */}
+               {chartData.length > 0 && chartData.some(d => d.hr !== null) && (
                    <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-5 shadow-sm">
                        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center mb-6">
-                           <Mountain className="w-4 h-4 text-emerald-500 mr-2" /> Elevation
+                           <HeartPulse className="w-4 h-4 text-rose-500 mr-2" /> Heart Rate
                        </h3>
                        <div className="h-48 w-full">
                            <ResponsiveContainer width="100%" height="100%">
-                               <AreaChart data={chartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
-                                   <defs>
-                                       <linearGradient id="colorAlt" x1="0" y1="0" x2="0" y2="1">
-                                           <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                                           <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                                       </linearGradient>
-                                   </defs>
+                               <LineChart data={chartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#3f3f46" opacity={0.2} />
                                    <XAxis dataKey="distance" minTickGap={30} tick={{fontSize: 12, fill: '#71717a'}} tickFormatter={(val) => `${val}km`} />
-                                   <YAxis tick={{fontSize: 12, fill: '#71717a'}} width={40} domain={['dataMin', 'dataMax']} tickFormatter={(val) => `${Math.round(val)}m`} />
+                                   <YAxis tick={{fontSize: 12, fill: '#71717a'}} width={40} domain={['dataMin', 'dataMax']} />
                                    <Tooltip 
                                       contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#fff', borderRadius: '8px' }}
                                       labelFormatter={(val) => `${val} km`}
-                                       formatter={(val: any) => [`${Math.round(val ?? 0)} m`, 'Elevation'] as any}
+                                       formatter={(val: any) => [`${Math.round(val ?? 0)} bpm`, 'Heart Rate'] as any}
                                    />
-                                   <Area type="monotone" dataKey="altitude" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorAlt)" isAnimationActive={false} />
-                               </AreaChart>
+                                   <Line type="monotone" dataKey="hr" stroke="#f43f5e" strokeWidth={2} dot={false} isAnimationActive={false} />
+                               </LineChart>
                            </ResponsiveContainer>
                        </div>
                    </div>
@@ -363,25 +476,31 @@ export default function ActivityDetail() {
                    </div>
                )}
 
-               {/* HR Chart */}
-               {chartData.length > 0 && chartData.some(d => d.hr !== null) && (
+               {/* Elevation Chart */}
+               {chartData.length > 0 && chartData.some(d => d.altitude !== null) && (
                    <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-5 shadow-sm">
                        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center mb-6">
-                           <HeartPulse className="w-4 h-4 text-rose-500 mr-2" /> Heart Rate
+                           <Mountain className="w-4 h-4 text-emerald-500 mr-2" /> Elevation
                        </h3>
                        <div className="h-48 w-full">
                            <ResponsiveContainer width="100%" height="100%">
-                               <LineChart data={chartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+                               <AreaChart data={chartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+                                   <defs>
+                                       <linearGradient id="colorAlt" x1="0" y1="0" x2="0" y2="1">
+                                           <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                                           <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                                       </linearGradient>
+                                   </defs>
                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#3f3f46" opacity={0.2} />
                                    <XAxis dataKey="distance" minTickGap={30} tick={{fontSize: 12, fill: '#71717a'}} tickFormatter={(val) => `${val}km`} />
-                                   <YAxis tick={{fontSize: 12, fill: '#71717a'}} width={40} domain={['dataMin', 'dataMax']} />
+                                   <YAxis tick={{fontSize: 12, fill: '#71717a'}} width={40} domain={['dataMin', 'dataMax']} tickFormatter={(val) => `${Math.round(val)}m`} />
                                    <Tooltip 
                                       contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#fff', borderRadius: '8px' }}
                                       labelFormatter={(val) => `${val} km`}
-                                       formatter={(val: any) => [`${Math.round(val ?? 0)} bpm`, 'Heart Rate'] as any}
+                                       formatter={(val: any) => [`${Math.round(val ?? 0)} m`, 'Elevation'] as any}
                                    />
-                                   <Line type="monotone" dataKey="hr" stroke="#f43f5e" strokeWidth={2} dot={false} isAnimationActive={false} />
-                               </LineChart>
+                                   <Area type="monotone" dataKey="altitude" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorAlt)" isAnimationActive={false} />
+                               </AreaChart>
                            </ResponsiveContainer>
                        </div>
                    </div>
@@ -410,7 +529,14 @@ export default function ActivityDetail() {
                                    {activity.splits.map((split, i) => (
                                        <tr key={i} className="border-b border-zinc-100 dark:border-zinc-800/50 hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
                                            <td className="px-4 py-3 font-semibold text-zinc-900 dark:text-white">
-                                               {split.split}
+                                               {split.distance < 950 ? (
+                                                  <span className="flex items-center gap-1.5">
+                                                    {split.split} 
+                                                    <span className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">({(split.distance / 1000).toFixed(2)} km)</span>
+                                                  </span>
+                                               ) : (
+                                                  split.split
+                                               )}
                                            </td>
                                            <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
                                                {formatPace(split.average_speed)}

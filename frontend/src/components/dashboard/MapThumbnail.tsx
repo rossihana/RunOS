@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { decodePolyline } from '../utils/polyline';
+import { decodePolyline } from '../../utils/polyline';
 
 interface MapThumbnailProps {
   polyline: string | null;

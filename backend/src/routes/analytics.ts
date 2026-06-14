@@ -1,13 +1,26 @@
-import { Router } from 'express';
-import { query } from '../db.js';
-import { AuthRequest, authenticate } from '../middleware/auth.js';
-import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format, subWeeks, subMonths } from 'date-fns';
-
+import { Router, Response } from 'express';
+import { query } from '@/db.js';
+import { AuthRequest, authenticate } from '@/middleware/auth.js';
+import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format, subWeeks, subMonths, eachDayOfInterval, parseISO } from 'date-fns';
+import { catchAsync } from '@/utils/catchAsync.js';
 const router = Router();
 
-router.get('/summary', authenticate, async (req: AuthRequest, res) => {
-  const userId = req.user?.id;
+const getLocalNow = async (userId: number) => {
+  const res = await query('SELECT timezone FROM users WHERE id = $1', [userId]);
+  const timezone = res.rows[0]?.timezone;
   const now = new Date();
+  if (!timezone) return now;
+  try {
+    // This creates a date object that represents the 'wall clock' time in the target timezone
+    return new Date(now.toLocaleString("en-US", { timeZone: timezone }));
+  } catch (e) {
+    return now;
+  }
+};
+
+router.get('/summary', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const userId = req.user?.id as number;
+  const now = await getLocalNow(userId);
 
   // Current periods
   const weekStart = format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
@@ -34,33 +47,33 @@ router.get('/summary', authenticate, async (req: AuthRequest, res) => {
     query('SELECT COUNT(*) as count FROM activities WHERE user_id = $1', [userId]),
     query(
       `SELECT SUM(distance) as total_distance FROM activities
-       WHERE user_id = $1 AND start_date >= $2 AND start_date <= $3`,
+       WHERE user_id = $1 AND COALESCE(start_date_local::date, start_date::date) >= $2 AND COALESCE(start_date_local::date, start_date::date) <= $3`,
       [userId, weekStart, weekEnd]
     ),
     query(
       `SELECT SUM(distance) as total_distance FROM activities
-       WHERE user_id = $1 AND start_date >= $2 AND start_date <= $3`,
+       WHERE user_id = $1 AND COALESCE(start_date_local::date, start_date::date) >= $2 AND COALESCE(start_date_local::date, start_date::date) <= $3`,
       [userId, monthStart, monthEnd]
     ),
     query(
       `SELECT AVG(average_speed) as avg_speed, AVG(average_heartrate) as avg_hr
-       FROM activities WHERE user_id = $1 AND start_date >= $2`,
+       FROM activities WHERE user_id = $1 AND COALESCE(start_date_local::date, start_date::date) >= $2`,
       [userId, thirtyDaysAgo]
     ),
     // Trend Queries
     query(
       `SELECT SUM(distance) as total_distance FROM activities
-       WHERE user_id = $1 AND start_date >= $2 AND start_date <= $3`,
+       WHERE user_id = $1 AND COALESCE(start_date_local::date, start_date::date) >= $2 AND COALESCE(start_date_local::date, start_date::date) <= $3`,
       [userId, prevWeekStart, prevWeekEnd]
     ),
     query(
       `SELECT SUM(distance) as total_distance FROM activities
-       WHERE user_id = $1 AND start_date >= $2 AND start_date <= $3`,
+       WHERE user_id = $1 AND COALESCE(start_date_local::date, start_date::date) >= $2 AND COALESCE(start_date_local::date, start_date::date) <= $3`,
       [userId, prevMonthStart, prevMonthEnd]
     ),
     // PR Queries (Max distance, max speed)
     query(
-      `SELECT name, distance, elapsed_time, moving_time, start_date 
+      `SELECT name, distance, elapsed_time, moving_time, COALESCE(start_date_local, start_date::date::text) as start_date
        FROM best_efforts 
        WHERE user_id = $1
        ORDER BY distance ASC`,
@@ -126,13 +139,13 @@ router.get('/summary', authenticate, async (req: AuthRequest, res) => {
     },
     prs: formattedPrs
   });
-});
+}));
 
-router.get('/charts', authenticate, async (req: AuthRequest, res) => {
+router.get('/charts', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;
 
   const result = await query(`
-    SELECT start_date, distance, average_speed, average_heartrate
+    SELECT COALESCE(start_date_local, start_date::date::text) as start_date, distance, average_speed, average_heartrate
     FROM activities
     WHERE user_id = $1
     ORDER BY start_date ASC
@@ -145,7 +158,7 @@ router.get('/charts', authenticate, async (req: AuthRequest, res) => {
       pace = 1000 / act.average_speed / 60;
     }
     return {
-      date: format(new Date(act.start_date), 'MMM dd'),
+      date: format(parseISO(act.start_date), 'MMM dd'),
       distance: (Number(act.distance) / 1000).toFixed(2),
       pace: pace.toFixed(2),
       heartRate: act.average_heartrate ? Math.round(act.average_heartrate) : 0,
@@ -153,6 +166,211 @@ router.get('/charts', authenticate, async (req: AuthRequest, res) => {
   });
 
   res.json(chartData);
-});
+}));
+
+router.get('/training-log', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const userId = req.user?.id as number;
+  const now = await getLocalNow(userId);
+  
+  // We need the full month, padded to the first Monday and last Sunday to form a complete grid
+  const startOfCurrentMonth = startOfMonth(now);
+  const endOfCurrentMonth = endOfMonth(now);
+  
+  const gridStart = startOfWeek(startOfCurrentMonth, { weekStartsOn: 1 });
+  const gridEnd = endOfWeek(endOfCurrentMonth, { weekStartsOn: 1 });
+
+  // 1. Get daily aggregates for the *entire grid*
+  const monthActivitiesRes = await query(
+    `SELECT COALESCE(start_date_local, start_date::date::text) as start_date, distance, moving_time 
+     FROM activities 
+     WHERE user_id = $1 AND COALESCE(start_date_local::date, start_date::date) >= $2 AND COALESCE(start_date_local::date, start_date::date) <= $3
+     ORDER BY start_date ASC`,
+    [userId, format(gridStart, 'yyyy-MM-dd'), format(gridEnd, 'yyyy-MM-dd')]
+  );
+
+  // Group by day
+  const dailyData = new Map();
+  for (const act of monthActivitiesRes.rows) {
+    const dateStr = act.start_date.includes('T') ? act.start_date.split('T')[0] : act.start_date.split(' ')[0];
+    const existing = dailyData.get(dateStr) || { distance: 0, moving_time: 0, count: 0 };
+    dailyData.set(dateStr, {
+      distance: existing.distance + Number(act.distance),
+      moving_time: existing.moving_time + Number(act.moving_time),
+      count: existing.count + 1
+    });
+  }
+
+  // 2. Calculate Week Streak
+  // Get all activities sorted by date descending to calculate the global active streak
+  const allRunsRes = await query(
+    `SELECT COALESCE(start_date_local, start_date::date::text) as start_date FROM activities WHERE user_id = $1 ORDER BY start_date DESC`,
+    [userId]
+  );
+
+  let currentStreakCount = 0;
+  
+  // Group all runs by "year-week" string (Monday start)
+  const runWeeks = new Set<string>();
+  for (const row of allRunsRes.rows) {
+    const weekStart = startOfWeek(parseISO(row.start_date), { weekStartsOn: 1 });
+    runWeeks.add(format(weekStart, 'yyyy-MM-dd'));
+  }
+
+  // Check backwards from the current week
+  let currentCheckWeek = startOfWeek(now, { weekStartsOn: 1 });
+  const currentWeekStr = format(currentCheckWeek, 'yyyy-MM-dd');
+  
+  let isStreakActive = false;
+
+  if (runWeeks.has(currentWeekStr)) {
+    isStreakActive = true;
+    currentStreakCount = 1;
+    currentCheckWeek = subWeeks(currentCheckWeek, 1);
+  } else {
+    // Check last week (streak is still alive if they haven't run *yet* this week, but did last week)
+    currentCheckWeek = subWeeks(currentCheckWeek, 1);
+    if (runWeeks.has(format(currentCheckWeek, 'yyyy-MM-dd'))) {
+      isStreakActive = true;
+      currentStreakCount = 1; 
+      currentCheckWeek = subWeeks(currentCheckWeek, 1);
+    }
+  }
+
+  // Build the set of weeks that are part of the *active* streak
+  const activeStreakWeeks = new Set<string>();
+  if (isStreakActive) {
+    // Re-add the weeks we already counted
+    if (currentStreakCount > 0) {
+      if (runWeeks.has(currentWeekStr)) activeStreakWeeks.add(currentWeekStr);
+      else activeStreakWeeks.add(format(subWeeks(startOfWeek(now, { weekStartsOn: 1 }), 1), 'yyyy-MM-dd'));
+    }
+    
+    while (runWeeks.has(format(currentCheckWeek, 'yyyy-MM-dd'))) {
+      activeStreakWeeks.add(format(currentCheckWeek, 'yyyy-MM-dd'));
+      currentStreakCount++;
+      currentCheckWeek = subWeeks(currentCheckWeek, 1);
+    }
+  }
+
+  // Calculate total activities during this specific active streak
+  let currentStreakActivitiesCount = 0;
+  if (isStreakActive) {
+      for (const act of allRunsRes.rows) {
+          const actWeekStr = format(startOfWeek(parseISO(act.start_date), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+          if (activeStreakWeeks.has(actWeekStr)) {
+              currentStreakActivitiesCount++;
+          }
+      }
+  }
+
+  // 3. Generate array of days organized into weeks (rows)
+  const daysInGrid = eachDayOfInterval({ start: gridStart, end: gridEnd });
+  const weeksData = [];
+  let currentWeekDays = [];
+  let currentWeekId = '';
+
+  for (let i = 0; i < daysInGrid.length; i++) {
+      const day = daysInGrid[i];
+      const dateStr = format(day, 'yyyy-MM-dd');
+      const data = dailyData.get(dateStr) || { distance: 0, moving_time: 0, count: 0 };
+      
+      if (i % 7 === 0) {
+          currentWeekId = dateStr; // Monday's date string identifies the week
+      }
+
+      currentWeekDays.push({
+          date: dateStr,
+          distance: data.distance,
+          moving_time: data.moving_time,
+          count: data.count,
+          isCurrentMonth: day >= startOfCurrentMonth && day <= endOfCurrentMonth,
+          isToday: dateStr === format(now, 'yyyy-MM-dd')
+      });
+
+      // End of week (Sunday)
+      if (i % 7 === 6) {
+          // Check if this specific week in the grid is part of the active, unbroken streak
+          const isPartOfActiveStreak = activeStreakWeeks.has(currentWeekId);
+          
+          // Check if this specific week had *any* run at all (regardless of streak)
+          const hasRunThisWeek = runWeeks.has(currentWeekId);
+          
+          // This is the current calendar week the user is living in
+          const isCurrentWeek = currentWeekId === currentWeekStr;
+
+          weeksData.push({
+              weekId: currentWeekId,
+              days: currentWeekDays,
+              isPartOfActiveStreak,
+              hasRunThisWeek,
+              isCurrentWeek
+          });
+          currentWeekDays = [];
+      }
+  }
+
+  res.json({
+    title: format(startOfCurrentMonth, 'MMMM yyyy'),
+    totalStreak: currentStreakCount,
+    totalStreakActivities: currentStreakActivitiesCount,
+    weeks: weeksData
+  });
+}));
+
+router.get('/recent-trend', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const userId = req.user?.id as number;
+  const now = await getLocalNow(userId);
+  
+  // 1. This Week Metrics (Monday-Sunday)
+  const weekStart = startOfWeek(now, { weekStartsOn: 1 });
+  const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
+  
+  const thisWeekRes = await query(
+    `SELECT SUM(distance) as distance, SUM(moving_time) as time, SUM(elevation_gain) as elevation
+     FROM activities 
+     WHERE user_id = $1 AND COALESCE(start_date_local::date, start_date::date) >= $2 AND COALESCE(start_date_local::date, start_date::date) <= $3`,
+    [userId, format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd')]
+  );
+
+  const thisWeek = {
+    distance: (Number(thisWeekRes.rows[0].distance) || 0) / 1000,
+    time: Number(thisWeekRes.rows[0].time) || 0,
+    elevation: Math.round(Number(thisWeekRes.rows[0].elevation) || 0)
+  };
+
+  // 2. Past 12 Weeks Trend
+  // We want 12 data points, each representing a week (Monday-Sunday)
+  const trendData = [];
+  let maxDistance = 0;
+
+  for (let i = 11; i >= 0; i--) {
+    const targetDate = subWeeks(now, i);
+    const ws = startOfWeek(targetDate, { weekStartsOn: 1 });
+    const we = endOfWeek(targetDate, { weekStartsOn: 1 });
+    
+    const weekRes = await query(
+      `SELECT SUM(distance) as distance FROM activities
+       WHERE user_id = $1 AND COALESCE(start_date_local::date, start_date::date) >= $2 AND COALESCE(start_date_local::date, start_date::date) <= $3`,
+      [userId, format(ws, 'yyyy-MM-dd'), format(we, 'yyyy-MM-dd')]
+    );
+
+    const distanceKm = (Number(weekRes.rows[0].distance) || 0) / 1000;
+    if (distanceKm > maxDistance) maxDistance = distanceKm;
+
+    trendData.push({
+      weekStart: ws.toISOString(),
+      weekEnd: we.toISOString(),
+      weekLabel: format(ws, 'd'),
+      monthLabel: format(ws, 'MMM').toUpperCase(),
+      distance: distanceKm
+    });
+  }
+
+  res.json({
+    thisWeek,
+    trendData,
+    maxDistance: Math.ceil(maxDistance / 10) * 10 || 10
+  });
+}));
 
 export default router;

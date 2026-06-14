@@ -1,18 +1,29 @@
-import { Router } from 'express';
-import { query } from '../db.js';
-import { AuthRequest, authenticate } from '../middleware/auth.js';
+import { Router, Response } from 'express';
+import { query } from '@/db.js';
+import { AuthRequest, authenticate } from '@/middleware/auth.js';
+import { catchAsync } from '@/utils/catchAsync.js';
 
 const router = Router();
 
-router.get('/', authenticate, async (req: AuthRequest, res) => {
-  const result = await query(
-    'SELECT * FROM races WHERE user_id = $1 ORDER BY race_date ASC',
-    [req.user?.id]
-  );
+router.get('/', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const result = await query(`
+    SELECT 
+      r.*,
+      a.name as activity_name,
+      a.distance as activity_distance,
+      a.moving_time as activity_moving_time,
+      a.average_pace as activity_average_pace,
+      a.start_date as activity_start_date,
+      a.strava_activity_id as activity_strava_id
+    FROM races r
+    LEFT JOIN activities a ON r.linked_activity_id = a.id
+    WHERE r.user_id = $1 
+    ORDER BY r.race_date ASC
+  `, [req.user?.id]);
   res.json(result.rows);
-});
+}));
 
-router.post('/', authenticate, async (req: AuthRequest, res) => {
+router.post('/', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
   const { race_name, distance, race_date, target_time, target_pace } = req.body;
 
   if (!race_name || !distance || !race_date) {
@@ -26,9 +37,31 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
   `, [req.user?.id, race_name, distance, race_date, target_time, target_pace]);
 
   res.status(201).json(result.rows[0]);
-});
+}));
 
-router.put('/:id', authenticate, async (req: AuthRequest, res) => {
+router.post('/:id/link-activity', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const { activity_id } = req.body;
+
+  if (!activity_id) {
+    return res.status(400).json({ error: 'Missing activity_id' });
+  }
+
+  const result = await query(`
+    UPDATE races
+    SET linked_activity_id = $1
+    WHERE id = $2 AND user_id = $3
+    RETURNING *
+  `, [activity_id, id, req.user?.id]);
+
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Race not found or unauthorized' });
+  }
+
+  res.json(result.rows[0]);
+}));
+
+router.put('/:id', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { race_name, distance, race_date, target_time, target_pace } = req.body;
 
@@ -44,9 +77,9 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
   }
 
   res.json(result.rows[0]);
-});
+}));
 
-router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
+router.delete('/:id', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
 
   const result = await query(
@@ -59,6 +92,6 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
   }
 
   res.json({ success: true });
-});
+}));
 
 export default router;

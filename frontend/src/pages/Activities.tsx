@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Activity as ActivityIcon, Clock, MapPin, HeartPulse, Search, SearchX, ArrowDownUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import api from '../services/api';
-import MapThumbnail from '../components/MapThumbnail';
+import MapThumbnail from '../components/dashboard/MapThumbnail';
 
 interface Activity {
   id: number;
@@ -13,6 +13,7 @@ interface Activity {
   average_pace: string;
   average_heartrate: number;
   start_date: string;
+  start_date_local?: string;
   map_polyline: string | null;
 }
 
@@ -81,9 +82,9 @@ export default function Activities() {
     return [...filtered].sort((a, b) => {
       switch (sortBy) {
         case 'date_desc':
-          return new Date(b.start_date).getTime() - new Date(a.start_date).getTime();
+          return new Date(b.start_date_local || b.start_date).getTime() - new Date(a.start_date_local || a.start_date).getTime();
         case 'date_asc':
-          return new Date(a.start_date).getTime() - new Date(b.start_date).getTime();
+          return new Date(a.start_date_local || a.start_date).getTime() - new Date(b.start_date_local || b.start_date).getTime();
         case 'distance_desc':
           return b.distance - a.distance;
         case 'pace_asc':
@@ -194,7 +195,7 @@ export default function Activities() {
                           <div>
                             <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 group-hover:text-orange-600 dark:group-hover:text-orange-500 transition-colors">{activity.name}</h3>
                             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                              {format(new Date(activity.start_date), 'EEEE, MMMM d, yyyy • h:mm a')}
+                              {format(new Date(activity.start_date_local || activity.start_date), 'EEEE, MMMM d, yyyy • h:mm a')}
                             </p>
                           </div>
                         </div>

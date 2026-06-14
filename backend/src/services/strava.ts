@@ -1,8 +1,8 @@
 import axios from 'axios';
-import { query } from '../db.js';
+import { query } from '@/db.js';
+import { env } from '@/config/env.js';
 
-const STRAVA_CLIENT_ID = process.env.STRAVA_CLIENT_ID;
-const STRAVA_CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
+const { STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET } = env;
 
 interface UserTokens {
   access_token: string;

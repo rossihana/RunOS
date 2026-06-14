@@ -5,14 +5,17 @@
 
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import Layout from './components/Layout';
-import ProtectedRoute from './components/ProtectedRoute';
+import Layout from '@/components/layout/Layout';
+import ProtectedRoute from '@/components/layout/ProtectedRoute';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Activities from './pages/Activities';
 import ActivityDetail from './pages/ActivityDetail';
 import Races from './pages/Races';
-import { ThemeProvider } from './components/ThemeProvider';
+import AICoach from './pages/AICoach.tsx';
+import TrainingPlan from './pages/TrainingPlan.tsx';
+import PerformanceLab from './pages/PerformanceLab';
+import { ThemeProvider } from '@/components/layout/ThemeProvider';
 
 export default function App() {
   return (
@@ -27,6 +30,9 @@ export default function App() {
               <Route path="activities" element={<Activities />} />
               <Route path="activities/:id" element={<ActivityDetail />} />
               <Route path="races" element={<Races />} />
+              <Route path="training" element={<TrainingPlan />} />
+              <Route path="ai-coach" element={<AICoach />} />
+              <Route path="lab" element={<PerformanceLab />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

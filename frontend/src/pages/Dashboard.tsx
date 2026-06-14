@@ -1,16 +1,46 @@
 import { useState, useEffect } from 'react';
-import { RefreshCw, TrendingUp, Activity, Calendar, HeartPulse, Target, Clock, ArrowRight, Award, ChevronUp, ChevronDown } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import api from '../services/api';
-import toast from 'react-hot-toast';
-import { useNumberCounter } from '../hooks/useNumberCounter';
-import { format, differenceInDays } from 'date-fns';
+import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
+import { 
+  Activity, 
+  Calendar, 
+  Target, 
+  Award, 
+  RefreshCw, 
+  Play,
+  ArrowUpRight,
+  TrendingUp,
+  Zap,
+  ChevronUp,
+  ChevronDown
+} from 'lucide-react';
+import { motion } from 'motion/react';
+import { format, differenceInDays, parseISO } from 'date-fns';
+import { Link } from 'react-router-dom';
+import api from '@/services/api';
+import { 
+  AreaChart, 
+  Area, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer 
+} from 'recharts';
+import TrainingLog from '@/components/dashboard/TrainingLog';
+import DistanceTrend from '@/components/charts/DistanceTrend';
+import MapThumbnail from '@/components/dashboard/MapThumbnail';
+import AICoachWidget from '@/components/dashboard/AICoachWidget';
+import RacePredictionCard from '@/components/dashboard/RacePredictionCard';
+import ReadinessChart from '@/components/charts/ReadinessChart';
 
-interface PR {
+interface Activity {
+  id: number;
   name: string;
-  distance: string;
-  timeFormatted: string;
-  date: string;
+  distance: number;
+  moving_time: number;
+  start_date: string;
+  start_date_local: string;
+  map_polyline: string | null;
 }
 
 interface Summary {
@@ -23,7 +53,12 @@ interface Summary {
     weeklyMileage: number;
     monthlyMileage: number;
   };
-  prs: PR[];
+  prs: Array<{
+    name: string;
+    distance: string;
+    timeFormatted: string;
+    date: string;
+  }>;
 }
 
 interface Race {
@@ -33,191 +68,236 @@ interface Race {
   race_date: string;
   target_time: string;
   target_pace: string;
+  prediction?: any;
 }
 
 export default function Dashboard() {
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [chartData, setChartData] = useState<any[]>([]);
-  const [nextRace, setNextRace] = useState<Race | null>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
+  const queryClient = useQueryClient();
 
-  const fetchData = async () => {
-    try {
-      const [summaryRes, chartsRes, racesRes] = await Promise.all([
-        api.get('/analytics/summary'),
-        api.get('/analytics/charts'),
-        api.get('/races')
-      ]);
-      setSummary(summaryRes.data);
-      setChartData(chartsRes.data);
-      
-      const upcomingRaces = (racesRes.data as Race[]).filter(r => new Date(r.race_date) >= new Date());
-      upcomingRaces.sort((a, b) => new Date(a.race_date).getTime() - new Date(b.race_date).getTime());
-      if (upcomingRaces.length > 0) {
-        setNextRace(upcomingRaces[0]);
-      } else {
-        setNextRace(null);
+  const results = useQueries({
+    queries: [
+      { queryKey: ['dashboard', 'summary'], queryFn: async () => (await api.get('/analytics/summary')).data },
+      { queryKey: ['dashboard', 'races'], queryFn: async () => (await api.get('/races')).data },
+      { queryKey: ['dashboard', 'trainingLog'], queryFn: async () => (await api.get('/analytics/training-log')).data },
+      { queryKey: ['dashboard', 'recentTrend'], queryFn: async () => (await api.get('/analytics/recent-trend')).data },
+      { queryKey: ['dashboard', 'activities'], queryFn: async () => (await api.get('/activities?limit=5')).data },
+      { queryKey: ['dashboard', 'readiness'], queryFn: async () => (await api.get('/activities/analytics/readiness')).data }
+    ]
+  });
+
+  const isLoading = results.some(q => q.isLoading);
+  const [summaryRes, racesRes, logRes, trendRes, activitiesRes, readinessRes] = results;
+
+  const summary = summaryRes.data as Summary | undefined;
+  const races = (racesRes.data as Race[]) || [];
+  const trainingLog = logRes.data;
+  const recentTrend = trendRes.data;
+  const activities = (activitiesRes.data as Activity[]) || [];
+  const readinessData = readinessRes.data || [];
+
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      return api.post('/activities/sync');
+    },
+    onSuccess: () => {
+      // Invalidate all dashboard queries to trigger a refetch
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (err) => {
+      console.error('Error syncing activities:', err);
+    }
+  });
+
+  const handleSync = () => {
+    syncMutation.mutate();
+  };
+
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1
       }
-
-    } catch (error) {
-      console.error('Failed to fetch dashboard data', error);
-      toast.error('Failed to load dashboard data');
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const handleSync = async () => {
-    setIsSyncing(true);
-    const toastId = toast.loading('Syncing activities from Strava...');
-    try {
-      const res = await api.post('/activities/sync');
-      await fetchData();
-      toast.success(res.data.count > 0 ? `Synced ${res.data.count} new activities!` : 'All activities are up to date.', { id: toastId });
-    } catch (error) {
-      console.error('Sync failed', error);
-      toast.error('Failed to sync activities.', { id: toastId });
-    } finally {
-      setIsSyncing(false);
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: {
+      opacity: 1, 
+      y: 0,
+      transition: {
+        type: "spring" as const,
+        stiffness: 100,
+        damping: 15
+      }
     }
   };
 
-  const getPaceDiff = (currentPace: string, targetPace: string) => {
-    if (!currentPace || !targetPace || currentPace === '0:00') return null;
-    const toSecs = (p: string) => {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600"></div>
+      </div>
+    );
+  }
+
+  const upcomingRaces = races.filter(race => new Date(race.race_date).getTime() >= new Date().setHours(0,0,0,0));
+  const nextRace = upcomingRaces.length > 0 ? upcomingRaces[0] : null;
+
+  // Helper for pace difference
+  const getPaceDiff = (avgPace: string, targetPace: string) => {
+    if (!avgPace || !targetPace) return null;
+    const toS = (p: string) => {
       const [m, s] = p.split(':').map(Number);
-      return m * 60 + s;
+      return m * 60 + (s || 0);
     };
-    const cSecs = toSecs(currentPace);
-    const tSecs = toSecs(targetPace);
-    const diff = cSecs - tSecs; // if diff > 0, current pace is slower than target
-    
-    if (diff === 0) return { text: "On target!", color: "text-emerald-600 dark:text-emerald-400" };
-    
+    const diff = toS(avgPace) - toS(targetPace);
     const absDiff = Math.abs(diff);
-    const m = Math.floor(absDiff / 60);
-    const s = absDiff % 60;
-    const diffStr = `${m}:${s.toString().padStart(2, '0')}`;
+    const mins = Math.floor(absDiff / 60);
+    const secs = absDiff % 60;
+    const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
     
-    if (diff > 0) return { text: `${diffStr} /km too slow`, color: "text-red-500 dark:text-red-400" };
-    return { text: `${diffStr} /km faster!`, color: "text-emerald-600 dark:text-emerald-400" };
+    if (diff <= 0) return { text: `-${timeStr} Ahead`, color: 'text-emerald-500' };
+    return { text: `+${timeStr} Behind`, color: 'text-red-500' };
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-8 pb-32">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">Dashboard</h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Your running performance at a glance.</p>
+          <h1 className="text-3xl font-extrabold text-zinc-900 dark:text-white tracking-tight">Dashboard</h1>
+          <p className="text-zinc-500 dark:text-zinc-400 font-medium">Welcome back! Here's your training progress.</p>
         </div>
-        <button
-          onClick={handleSync}
-          disabled={isSyncing}
-          className={`inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-zinc-900 dark:bg-zinc-800 rounded-xl hover:bg-zinc-800 dark:hover:bg-zinc-700 disabled:opacity-50 transition-colors shadow-sm`}
+        <button 
+           onClick={handleSync}
+           disabled={syncMutation.isPending}
+           className="flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white px-6 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-orange-600/20 active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
         >
-          <RefreshCw className={`mr-2 h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
-          {isSyncing ? 'Syncing...' : 'Sync Activities'}
+          <RefreshCw className={`w-4 h-4 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
+          {syncMutation.isPending ? 'Syncing...' : 'Sync & Refresh'}
         </button>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard 
-          title="Weekly Mileage" 
-          value={Number(summary?.weeklyMileage || 0)} 
-          unit="km"
-          icon={TrendingUp} 
-          decimals={2}
-          trend={summary?.trends?.weeklyMileage}
-        />
-        <StatCard 
-          title="Monthly Mileage" 
-          value={Number(summary?.monthlyMileage || 0)} 
-          unit="km"
-          icon={Calendar}
-          decimals={2}
-          trend={summary?.trends?.monthlyMileage}
-        />
-        <StatCard 
-          title="Avg Pace (30d)" 
-          valueText={summary?.averagePace || '0:00'} 
-          unit="/km"
-          icon={Activity} 
-        />
-        <StatCard 
-          title="Avg Heart Rate" 
-          value={summary?.averageHeartRate || 0} 
-          unit="bpm"
-          icon={HeartPulse} 
-        />
-      </div>
-
-      {/* PR Badges & Next Race */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Next Race Banner (Takes 2 columns on lg screens) */}
-        {nextRace ? (
-          <div className="lg:col-span-2 bg-gradient-to-r from-orange-500 to-red-500 rounded-2xl p-6 text-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-6 overflow-hidden relative">
-            <div className="absolute top-0 right-0 -mr-8 -mt-8 opacity-10">
-              <Target className="w-48 h-48" />
+      {/* Stats Overview */}
+      <motion.div 
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
+      >
+        {[
+          { label: 'Weekly Mileage', value: summary?.weeklyMileage || '0.00', unit: 'km', icon: Activity, color: 'orange', trend: summary?.trends?.weeklyMileage },
+          { label: 'Monthly Mileage', value: summary?.monthlyMileage || '0.00', unit: 'km', icon: Calendar, color: 'blue', trend: summary?.trends?.monthlyMileage },
+          { label: 'Avg Pace', value: summary?.averagePace || '0:00', unit: '/km', icon: Zap, color: 'purple' },
+          { label: 'Avg Heart Rate', value: summary?.averageHeartRate || '0', unit: 'bpm', icon: Activity, color: 'rose' },
+        ].map((stat, idx) => (
+          <motion.div 
+            key={idx}
+            variants={itemVariants}
+            className="group relative bg-white dark:bg-[#1C1C1E] p-6 rounded-[2rem] border border-zinc-200/50 dark:border-white/5 shadow-xl shadow-zinc-200/40 dark:shadow-black/20 transition-all hover:shadow-2xl hover:shadow-zinc-300/50 dark:hover:shadow-black/40 hover:-translate-y-1 overflow-hidden"
+          >
+            {/* Subtle Gradient Background */}
+            <div className={`absolute -right-4 -top-4 w-24 h-24 bg-${stat.color}-500/5 rounded-full blur-2xl group-hover:bg-${stat.color}-500/10 transition-all duration-500`}></div>
+            
+            <div className="flex items-center gap-3 mb-4">
+              <div className={`w-10 h-10 rounded-xl bg-${stat.color}-50 dark:bg-${stat.color}-600/10 flex items-center justify-center transition-transform group-hover:scale-110`}>
+                <stat.icon className={`w-5 h-5 text-${stat.color}-600`} />
+              </div>
+              <span className="text-xs font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{stat.label}</span>
             </div>
             
-            <div className="z-10">
-              <div className="flex items-center gap-2 text-white/80 text-sm font-medium mb-1 uppercase tracking-wider">
-                <Calendar className="w-4 h-4" /> Next Up
-              </div>
-              <h2 className="text-2xl font-bold mb-1">{nextRace.race_name}</h2>
-              <div className="flex flex-wrap items-center gap-4 text-sm font-medium text-white/90">
-                <span>{format(new Date(nextRace.race_date), 'MMMM d, yyyy')}</span>
-                <span>•</span>
-                <span>{nextRace.distance} km</span>
-              </div>
+            <div className="flex items-baseline gap-2 relative z-10">
+              <span className="text-4xl font-black text-zinc-900 dark:text-white tracking-tighter">
+                {stat.label.includes('Avg') ? stat.value : <AnimatedNumber value={parseFloat(stat.value as string)} />}
+              </span>
+              <span className="text-sm font-bold text-zinc-400 uppercase tracking-widest">{stat.unit}</span>
             </div>
 
-            <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/20 flex items-center gap-6 z-10">
-              <div className="text-center">
-                <div className="text-3xl font-bold">{differenceInDays(new Date(nextRace.race_date), new Date())}</div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-white/70">Days Left</div>
+            {stat.trend !== undefined && (
+              <div className={`mt-4 inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full ${stat.trend >= 0 ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10' : 'text-red-500 bg-red-50 dark:bg-red-500/10'}`}>
+                {stat.trend >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingUp className="w-3.5 h-3.5 rotate-180" />}
+                {Math.abs(stat.trend)}% <span className="opacity-60 font-medium">vs last {stat.label.includes('Weekly') ? 'week' : 'month'}</span>
               </div>
-              <div className="w-px h-12 bg-white/20"></div>
-              <div>
-                <div className="flex items-center gap-4 mb-2">
-                  <div className="text-right">
-                    <div className="text-xs text-white/70 font-medium">Target Pace</div>
-                    <div className="font-bold">{nextRace.target_pace || '--'} <span className="text-xs font-normal opacity-70">/km</span></div>
+            )}
+          </motion.div>
+        ))}
+      </motion.div>
+
+      {/* Main Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+        
+        {/* Upcoming Races & AI Coach Widget */}
+        <div className="lg:col-span-2 xl:col-span-2 h-full flex flex-col gap-4">
+          {upcomingRaces.length > 0 ? (
+            <div className="flex flex-col gap-6">
+              {upcomingRaces.map((race) => (
+                <div key={race.id} className="flex flex-col gap-0">
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 relative overflow-hidden group">
+                    {/* Background Decoration */}
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-orange-600/10 rounded-full -mr-32 -mt-32 blur-3xl group-hover:bg-orange-600/20 transition-all duration-700"></div>
+                    
+                    <div className="relative flex flex-col sm:flex-row justify-between h-full gap-6">
+                      <div className="flex items-center gap-5">
+                        <div className="w-16 h-16 bg-orange-600 rounded-2xl flex items-center justify-center shadow-xl shadow-orange-600/20 rotate-3 group-hover:rotate-0 transition-transform shrink-0">
+                          <Target className="w-8 h-8 text-white" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-orange-500 uppercase tracking-widest mb-1">Upcoming Race</div>
+                          <h3 className="text-2xl font-black text-white">{race.race_name}</h3>
+                          <div className="flex items-center gap-4 mt-1 text-zinc-400 font-medium">
+                            <span className="flex items-center gap-1.5"><Calendar className="w-4 h-4" /> {format(new Date(race.race_date), 'MMMM d, yyyy')}</span>
+                            <span className="flex items-center gap-1.5"><Activity className="w-4 h-4" /> {race.distance} km</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-4">
+                        <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl px-5 py-3">
+                          <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-0.5">Target Time</div>
+                          <div className="text-lg font-black text-white">{race.target_time}</div>
+                        </div>
+                        <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl px-5 py-3">
+                          <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-0.5">Target Pace</div>
+                          <div className="text-lg font-black text-white">{race.target_pace || 'N/A'}</div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <ArrowRight className="w-4 h-4 text-white/50" />
-                  <div>
-                    <div className="text-xs text-white/70 font-medium">Current Pace</div>
-                    <div className="font-bold">{summary?.averagePace || '--'} <span className="text-xs font-normal opacity-70">/km</span></div>
-                  </div>
+                  
+                  {/* AI Prediction Card - Now a distinct card */}
+                  <RacePredictionCard race={race} onUpdate={() => queryClient.invalidateQueries({ queryKey: ['dashboard'] })} />
                 </div>
-                {summary?.averagePace && nextRace.target_pace && (
-                  <div className={`text-xs font-semibold px-2 py-1 rounded-md inline-block bg-white/20 backdrop-blur-sm ${getPaceDiff(summary.averagePace, nextRace.target_pace)?.color.replace('text-', 'text-white ')}`}>
-                    Gap: {getPaceDiff(summary.averagePace, nextRace.target_pace)?.text}
-                  </div>
-                )}
-              </div>
+              ))}
             </div>
-          </div>
-        ) : (
-          <div className="lg:col-span-2 bg-zinc-100 dark:bg-zinc-800/50 rounded-2xl p-6 border border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center text-center">
-             <Target className="w-12 h-12 text-zinc-300 dark:text-zinc-600 mb-3" />
-             <h3 className="text-lg font-medium text-zinc-900 dark:text-zinc-100">No Upcoming Races</h3>
-             <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 max-w-sm">Set a target in the Races tab to track your training pace gap.</p>
-          </div>
-        )}
+          ) : (
+            <div className="bg-zinc-100 dark:bg-zinc-800/50 rounded-3xl p-6 border border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center text-center h-full min-h-[200px]">
+               <Target className="w-12 h-12 text-zinc-300 dark:text-zinc-600 mb-3" />
+               <h3 className="text-lg font-medium text-zinc-900 dark:text-zinc-100">No Upcoming Races</h3>
+               <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 max-w-sm">Set a target in the Races tab to track your training pace.</p>
+            </div>
+          )}
+        </div>
 
-        {/* PR Badges - Best Efforts Details */}
-        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-6 flex flex-col h-full max-h-[350px]">
+        <div className="lg:col-span-1 xl:col-span-1">
+          <AICoachWidget />
+        </div>
+
+        {/* Training Log Section */}
+        <div className="lg:col-span-1 xl:col-span-2">
+           <TrainingLog data={trainingLog} />
+        </div>
+
+        {/* Best Efforts List */}
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-6 flex flex-col h-full lg:col-span-1">
           <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100 mb-4 flex items-center shrink-0">
             <Award className="w-5 h-5 text-yellow-500 mr-2" />
             Best Efforts
           </h3>
           
-          <div className="flex-1 overflow-y-auto pr-2 -mr-2">
+          <div className="flex-1 overflow-y-auto pr-2 -mr-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
               {[
                 { id: '5K', label: '5K', defaultDistance: '5.00' },
@@ -230,7 +310,7 @@ export default function Dashboard() {
               ].map((cat) => {
                 const prData = summary?.prs?.find(pr => pr.name === cat.id);
                 return (
-                  <div key={cat.id} className="flex items-center justify-between py-3 group">
+                  <div key={cat.id} className="flex items-center justify-between py-2.5 group">
                     <div>
                       <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 group-hover:text-orange-600 dark:group-hover:text-orange-500 transition-colors">{cat.label}</div>
                       <div className="text-xs text-zinc-500 dark:text-zinc-400">{prData ? prData.date : 'No record'}</div>
@@ -245,105 +325,85 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm transition-shadow hover:shadow-md">
-          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100 mb-6">Recent Distance Trend (km)</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="colorDistance" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--chart-distance)" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="var(--chart-distance)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" strokeOpacity={0.1} />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#71717a', fontSize: 12, fontFamily: 'var(--font-sans)' }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#71717a', fontSize: 12, fontFamily: 'var(--font-sans)' }} dx={-10} />
-                <Tooltip 
-                  contentStyle={{ borderRadius: '8px', border: '1px solid #e4e4e7', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontFamily: 'var(--font-sans)', fontSize: 14, backgroundColor: 'var(--tw-prose-body)' }}
-                  wrapperClassName="dark:!bg-zinc-900 dark:!border-zinc-800 dark:!text-zinc-100"
-                />
-                <Area type="monotone" dataKey="distance" stroke="var(--chart-distance)" strokeWidth={3} fillOpacity={1} fill="url(#colorDistance)" dot={{ r: 4, fill: 'var(--chart-distance)', strokeWidth: 2, stroke: 'var(--bg-card)' }} activeDot={{ r: 6, strokeWidth: 0 }} />
-              </AreaChart>
-            </ResponsiveContainer>
+        {/* Readiness Chart */}
+        <div className="lg:col-span-2 xl:col-span-3">
+          <ReadinessChart data={readinessData} />
+        </div>
+
+        {/* Distance Trend Chart */}
+        <div className="lg:col-span-2 xl:col-span-2">
+           <DistanceTrend data={recentTrend} />
+        </div>
+
+        {/* Recent Activities Feed */}
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-6 lg:col-span-1">
+          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100 mb-4 flex items-center">
+            <Activity className="w-5 h-5 text-orange-600 mr-2" />
+            Recent Runs
+          </h3>
+          <div className="space-y-4">
+            {activities.slice(0, 5).length > 0 ? activities.slice(0, 5).map((activity) => (
+              <Link 
+                key={activity.id} 
+                to={`/activities/${activity.id}`}
+                className="flex items-center gap-4 p-3 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-all group cursor-pointer border border-transparent hover:border-zinc-100 dark:hover:border-zinc-800"
+              >
+                <div className="w-14 h-14 md:w-16 md:h-12 bg-zinc-100 dark:bg-zinc-800 rounded-lg flex items-center justify-center shrink-0 group-hover:bg-white dark:group-hover:bg-zinc-700 transition-colors overflow-hidden border border-zinc-200 dark:border-zinc-700">
+                  <MapThumbnail polyline={activity.map_polyline} className="w-full h-full object-cover" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-bold text-zinc-900 dark:text-white truncate group-hover:text-orange-600 dark:group-hover:text-orange-500 transition-colors">{activity.name}</div>
+                  <div className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">{format(parseISO(activity.start_date_local || activity.start_date), 'MMM d, yyyy')}</div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-sm font-black text-zinc-900 dark:text-white">{(activity.distance / 1000).toFixed(1)} km</div>
+                  <div className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase">{Math.floor(activity.moving_time / 60)}m</div>
+                </div>
+              </Link>
+            )) : (
+              <div className="text-center py-6 text-zinc-500 text-sm">No recent activities found</div>
+            )}
           </div>
         </div>
 
-        <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm transition-shadow hover:shadow-md">
-          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100 mb-6">Recent Pace Trend (min/km)</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="colorPace" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--chart-pace)" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="var(--chart-pace)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" strokeOpacity={0.1} />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#71717a', fontSize: 12, fontFamily: 'var(--font-sans)' }} dy={10} />
-                <YAxis reversed axisLine={false} tickLine={false} tick={{ fill: '#71717a', fontSize: 12, fontFamily: 'var(--font-sans)' }} dx={-10} />
-                <Tooltip 
-                  contentStyle={{ borderRadius: '8px', border: '1px solid #e4e4e7', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontFamily: 'var(--font-sans)', fontSize: 14 }}
-                  wrapperClassName="dark:!bg-zinc-900 dark:!border-zinc-800 dark:!text-zinc-100"
-                  formatter={(value: any) => [`${Number(value).toFixed(2)} min/km`, 'Pace']}
-                />
-                <Area type="monotone" dataKey="pace" stroke="var(--chart-pace)" strokeWidth={3} fillOpacity={1} fill="url(#colorPace)" dot={{ r: 4, fill: 'var(--chart-pace)', strokeWidth: 2, stroke: 'var(--bg-card)' }} activeDot={{ r: 6, strokeWidth: 0 }} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
       </div>
+
     </div>
   );
 }
 
-function StatCard({ title, value, valueText, unit, icon: Icon, decimals = 0, trend }: { title: string, value?: number, valueText?: string, unit: string, icon: any, decimals?: number, trend?: number }) {
-  const animatedValue = useNumberCounter(value || 0);
+// Sub-component for animated numbers
+function AnimatedNumber({ value }: { value: number }) {
+  const animatedValue = useNumberCounter(value);
+  // Check if it should be float or int
+  const displayValue = Number.isInteger(value) 
+    ? Math.floor(animatedValue) 
+    : animatedValue.toFixed(2);
+  
+  return <>{displayValue}</>;
+}
 
-  const renderTrend = () => {
-    if (trend === undefined) return null;
-    
-    const isPositive = trend > 0;
-    const isNegative = trend < 0;
-    const isNeutral = trend === 0;
+// Custom Counter Hook
+function useNumberCounter(end: number, duration: number = 1000) {
+  const [count, setCount] = useState(0);
 
-    let color = 'text-zinc-500 bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-400';
-    let IconComponent = null;
 
-    if (isPositive) {
-      color = 'text-emerald-700 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-500/10';
-      IconComponent = ChevronUp;
-    } else if (isNegative) {
-      color = 'text-red-700 bg-red-50 dark:text-red-400 dark:bg-red-500/10';
-      IconComponent = ChevronDown;
-    }
 
-    return (
-      <div className={`flex items-center gap-1 mt-2 text-xs font-medium px-2 py-1 rounded-md inline-flex ${color}`}>
-        {IconComponent && <IconComponent className="w-3 h-3" />}
-        <span>{isNeutral ? 'No change' : `${Math.abs(trend)}%`}</span>
-      </div>
-    );
-  };
+  useEffect(() => {
+    let start = 0;
+    const increment = end / (duration / 16);
+    const timer = setInterval(() => {
+      start += increment;
+      if (start >= end) {
+        setCount(end);
+        clearInterval(timer);
+      } else {
+        setCount(start);
+      }
+    }, 16);
+    return () => clearInterval(timer);
+  }, [end, duration]);
 
-  return (
-    <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm flex items-start justify-between transition-transform hover:-translate-y-1 hover:shadow-md duration-200 group">
-      <div>
-        <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{title}</p>
-        <p className="text-2xl font-semibold text-zinc-900 dark:text-white mt-1">
-          {valueText ? valueText : animatedValue.toFixed(decimals)} 
-          <span className="text-lg text-zinc-500 dark:text-zinc-400 ml-1">{unit}</span>
-        </p>
-        {renderTrend()}
-      </div>
-      <div className="p-3 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 transition-colors group-hover:bg-zinc-200 dark:group-hover:bg-zinc-700">
-        <Icon className="h-6 w-6" />
-      </div>
-    </div>
-  );
+  return count;
 }
