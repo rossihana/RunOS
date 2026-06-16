@@ -1,9 +1,9 @@
 import { Router, Response } from 'express';
-import { query } from '@/db.js';
-import { AuthRequest, authenticate } from '@/middleware/auth.js';
+import { query } from '../db.js';
+import { AuthRequest, authenticate } from '../middleware/auth.js';
 import axios from 'axios';
-import { getValidAccessToken } from '@/services/strava.js';
-import { catchAsync } from '@/utils/catchAsync.js';
+import { getValidAccessToken } from '../services/strava.js';
+import { catchAsync } from '../utils/catchAsync.js';
 
 const router = Router();
 
@@ -23,9 +23,9 @@ router.get('/', authenticate, catchAsync(async (req: AuthRequest, res: Response)
 
 // ─── Performance Lab (MUST be before /:id to avoid Express wildcard capture) ─
 
-import { computeZones, computeZoneDistribution, estimateVO2Max, calculateReadiness, predictRaceTimes, calculateBiomechanicalTrend, calculateAerobicDecoupling } from '@/services/analytics.js';
+import { computeZones, computeZoneDistribution, estimateVO2Max, calculateReadiness, predictRaceTimes, calculateBiomechanicalTrend, calculateAerobicDecoupling } from '../services/analytics.js';
 import { z } from 'zod';
-import { validateRequest } from '@/middleware/validate.js';
+import { validateRequest } from '../middleware/validate.js';
 
 const labConfigSchema = z.object({
   body: z.object({

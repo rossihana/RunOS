@@ -1,8 +1,8 @@
 import { Router, Response } from 'express';
-import { query } from '@/db.js';
-import { AuthRequest, authenticate } from '@/middleware/auth.js';
+import { query } from '../db.js';
+import { AuthRequest, authenticate } from '../middleware/auth.js';
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format, subWeeks, subMonths, eachDayOfInterval, parseISO } from 'date-fns';
-import { catchAsync } from '@/utils/catchAsync.js';
+import { catchAsync } from '../utils/catchAsync.js';
 const router = Router();
 
 const getLocalNow = async (userId: number) => {

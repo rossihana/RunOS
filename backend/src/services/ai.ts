@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { env } from '@/config/env.js';
+import { env } from '../config/env.js';
 
 const openai = new OpenAI({
   apiKey: env.GEMINI_API_KEY || 'no-key',

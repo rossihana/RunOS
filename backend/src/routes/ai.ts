@@ -1,6 +1,6 @@
 import { Router, Response, Request } from 'express';
-import { query } from '@/db.js';
-import { AuthRequest, authenticate } from '@/middleware/auth.js';
+import { query } from '../db.js';
+import { AuthRequest, authenticate } from '../middleware/auth.js';
 import { 
   generateAIResponse, 
   AI_COACH_SYSTEM_PROMPT, 
@@ -8,9 +8,9 @@ import {
   TRAINING_PLAN_SYSTEM_PROMPT,
   SMART_MERGE_SYSTEM_PROMPT,
   CHAT_SYSTEM_PROMPT
-} from '@/services/ai.js';
+} from '../services/ai.js';
 import { format } from 'date-fns';
-import { catchAsync } from '@/utils/catchAsync.js';
+import { catchAsync } from '../utils/catchAsync.js';
 
 const router = Router();
 

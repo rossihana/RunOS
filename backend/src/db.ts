@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import * as schema from './schema.js';
 
-import { env } from '@/config/env.js';
+import { env } from './config/env.js';
 
 export const pool = new Pool({
   connectionString: env.DATABASE_URL,

@@ -1,10 +1,10 @@
 import { Router, Response, Request } from 'express';
-import { query } from '@/db.js';
+import { query } from '../db.js';
 import jwt from 'jsonwebtoken';
 import axios from 'axios';
-import { AuthRequest, authenticate } from '@/middleware/auth.js';
-import { env } from '@/config/env.js';
-import { catchAsync } from '@/utils/catchAsync.js';
+import { AuthRequest, authenticate } from '../middleware/auth.js';
+import { env } from '../config/env.js';
+import { catchAsync } from '../utils/catchAsync.js';
 
 const router = Router();
 const JWT_SECRET = env.JWT_SECRET;

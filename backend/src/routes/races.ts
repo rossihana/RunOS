@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
-import { query } from '@/db.js';
-import { AuthRequest, authenticate } from '@/middleware/auth.js';
-import { catchAsync } from '@/utils/catchAsync.js';
+import { query } from '../db.js';
+import { AuthRequest, authenticate } from '../middleware/auth.js';
+import { catchAsync } from '../utils/catchAsync.js';
 
 const router = Router();
 

@@ -2,13 +2,13 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import authRoutes from '@/routes/auth.js';
-import activitiesRoutes from '@/routes/activities.js';
-import racesRoutes from '@/routes/races.js';
-import analyticsRoutes from '@/routes/analytics.js';
-import aiRoutes from '@/routes/ai.js';
-import { initDb, pool } from '@/db.js';
-import { globalErrorHandler } from '@/middleware/error.js';
+import authRoutes from './src/routes/auth.js';
+import activitiesRoutes from './src/routes/activities.js';
+import racesRoutes from './src/routes/races.js';
+import analyticsRoutes from './src/routes/analytics.js';
+import aiRoutes from './src/routes/ai.js';
+import { initDb, pool } from './src/db.js';
+import { globalErrorHandler } from './src/middleware/error.js';
 
 
 const app = express();
