@@ -95,7 +95,7 @@ router.get('/lab', authenticate, async (req: AuthRequest, res) => {
       : null;
 
     const allActivities = await query(
-      `SELECT start_date, moving_time, average_heartrate, distance, cadence, average_speed FROM activities WHERE user_id = $1 ORDER BY start_date ASC`,
+      `SELECT COALESCE(start_date_local, start_date::date::text) as start_date, moving_time, average_heartrate, distance, cadence, average_speed FROM activities WHERE user_id = $1 ORDER BY start_date ASC`,
       [userId]
     );
 
@@ -383,7 +383,7 @@ router.post('/sync', authenticate, catchAsync(async (req: AuthRequest, res: Resp
 router.get('/analytics/readiness', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;
   const result = await query(
-    `SELECT name, start_date, moving_time, average_heartrate, distance
+    `SELECT name, COALESCE(start_date_local, start_date::date::text) as start_date, moving_time, average_heartrate, distance
      FROM activities 
      WHERE user_id = $1
      ORDER BY start_date ASC`,

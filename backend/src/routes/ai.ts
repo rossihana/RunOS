@@ -17,8 +17,26 @@ const router = Router();
 // Helper to compute today's Form/Readiness score
 async function getReadinessScore(userId: number) {
   try {
+    const parseLocalDate = (dateStr: string | Date): Date => {
+      if (dateStr instanceof Date) {
+        return new Date(dateStr.getFullYear(), dateStr.getMonth(), dateStr.getDate());
+      }
+      const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) {
+        return new Date(parseInt(match[1], 10), parseInt(match[2], 10) - 1, parseInt(match[3], 10));
+      }
+      return new Date(dateStr);
+    };
+
+    const formatLocalDate = (d: Date): string => {
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    };
+
     const result = await query(
-      `SELECT start_date, moving_time, average_heartrate, distance
+      `SELECT COALESCE(start_date_local, start_date::date::text) as start_date, moving_time, average_heartrate, distance
        FROM activities 
        WHERE user_id = $1
        ORDER BY start_date ASC`,
@@ -31,7 +49,10 @@ async function getReadinessScore(userId: number) {
     const dailyLoad = new Map<string, number>();
 
     activities.forEach(act => {
-      const day = new Date(act.start_date).toISOString().split('T')[0];
+      const dateStr = typeof act.start_date === 'string'
+        ? act.start_date
+        : (act.start_date as Date).toISOString();
+      const day = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr.split(' ')[0];
       const minutes = act.moving_time / 60;
       let load = 0;
       if (act.average_heartrate) {
@@ -51,7 +72,7 @@ async function getReadinessScore(userId: number) {
 
     let firstDate = new Date();
     firstDate.setDate(firstDate.getDate() - 90); 
-    const actDate = new Date(activities[0].start_date);
+    const actDate = parseLocalDate(activities[0].start_date);
     actDate.setHours(0,0,0,0);
     if (actDate < firstDate) firstDate = actDate;
 
@@ -60,7 +81,7 @@ async function getReadinessScore(userId: number) {
     const cursorDate = new Date(firstDate);
 
     while (cursorDate <= today) {
-      const dateStr = cursorDate.toISOString().split('T')[0];
+      const dateStr = formatLocalDate(cursorDate);
       const load = dailyLoad.get(dateStr) || 0;
       ctl = ctl * ctlConst + load * (1 - ctlConst);
       atl = atl * atlConst + load * (1 - atlConst);
@@ -90,20 +111,20 @@ async function getFullUserContext(userId: number) {
       WHERE user_id = $1 AND start_date >= NOW() - INTERVAL '7 days'
     `, [userId]),
     query(`
-      SELECT start_date, distance, average_heartrate
+      SELECT COALESCE(start_date_local, start_date::date::text) as start_date, distance, average_heartrate
       FROM activities 
       WHERE user_id = $1 AND start_date >= NOW() - INTERVAL '1 week'
       ORDER BY start_date DESC
     `, [userId]),
     query(`
-      SELECT id, name, distance, moving_time, average_speed, average_heartrate, elevation_gain, start_date
+      SELECT id, name, distance, moving_time, average_speed, average_heartrate, elevation_gain, COALESCE(start_date_local, start_date::date::text) as start_date
       FROM activities 
       WHERE user_id = $1 
       ORDER BY start_date DESC 
       LIMIT 10
     `, [userId]),
     query(`
-      SELECT name, distance, elapsed_time, start_date
+      SELECT name, distance, elapsed_time, COALESCE(start_date_local, start_date::date::text) as start_date
       FROM best_efforts
       WHERE user_id = $1
       ORDER BY distance ASC

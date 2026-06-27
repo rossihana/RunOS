@@ -133,6 +133,24 @@ export function estimateVO2Max(activities: ActivityData[], maxHr: number = 190):
 }
 
 export function calculateReadiness(allActivities: ActivityData[]) {
+  const parseLocalDate = (dateStr: string | Date): Date => {
+    if (dateStr instanceof Date) {
+      return new Date(dateStr.getFullYear(), dateStr.getMonth(), dateStr.getDate());
+    }
+    const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      return new Date(parseInt(match[1], 10), parseInt(match[2], 10) - 1, parseInt(match[3], 10));
+    }
+    return new Date(dateStr);
+  };
+
+  const formatLocalDate = (d: Date): string => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
   const ctlConst = Math.exp(-1 / 42);
   const atlConst = Math.exp(-1 / 7);
   let ctl = 0, atl = 0;
@@ -141,7 +159,10 @@ export function calculateReadiness(allActivities: ActivityData[]) {
   const dailyActivities = new Map<string, Array<{ name: string; distance: number; load: number }>>();
 
   allActivities.forEach(act => {
-    const day = new Date(act.start_date).toISOString().split('T')[0];
+    const dateStr = typeof act.start_date === 'string'
+      ? act.start_date
+      : (act.start_date as Date).toISOString();
+    const day = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr.split(' ')[0];
     const minutes = act.moving_time / 60;
     let load = 0;
     if (act.average_heartrate) {
@@ -170,7 +191,7 @@ export function calculateReadiness(allActivities: ActivityData[]) {
   startDate.setDate(startDate.getDate() - 90);
   
   if (allActivities.length > 0) {
-    const earliest = new Date(allActivities[0].start_date);
+    const earliest = parseLocalDate(allActivities[0].start_date);
     earliest.setHours(0, 0, 0, 0);
     if (earliest < startDate) startDate = earliest;
   }
@@ -181,7 +202,7 @@ export function calculateReadiness(allActivities: ActivityData[]) {
   seriesStartDate.setDate(seriesStartDate.getDate() - 30);
 
   while (cursor <= today) {
-    const ds = cursor.toISOString().split('T')[0];
+    const ds = formatLocalDate(cursor);
     const load = dailyLoad.get(ds) || 0;
     ctl = ctl * ctlConst + load * (1 - ctlConst);
     atl = atl * atlConst + load * (1 - atlConst);
@@ -225,17 +246,35 @@ export function predictRaceTimes(vo2max: number | null) {
 }
 
 export function calculateBiomechanicalTrend(activities: ActivityData[]) {
+  const parseLocalDate = (dateStr: string | Date): Date => {
+    if (dateStr instanceof Date) {
+      return new Date(dateStr.getFullYear(), dateStr.getMonth(), dateStr.getDate());
+    }
+    const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      return new Date(parseInt(match[1], 10), parseInt(match[2], 10) - 1, parseInt(match[3], 10));
+    }
+    return new Date(dateStr);
+  };
+
+  const formatLocalDate = (d: Date): string => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
   const trend: Array<{ week: string; cadence: number; stride: number }> = [];
   const today = new Date();
   const twelveWeeksAgo = new Date(today);
   twelveWeeksAgo.setDate(twelveWeeksAgo.getDate() - 84);
-  const recentActs = activities.filter(a => new Date(a.start_date) >= twelveWeeksAgo && a.cadence && a.average_speed);
+  const recentActs = activities.filter(a => parseLocalDate(a.start_date) >= twelveWeeksAgo && a.cadence && a.average_speed);
   
   const weeklyMech = new Map<string, { totalCadence: number, totalStride: number, count: number }>();
   recentActs.forEach(act => {
-    const d = new Date(act.start_date);
+    const d = parseLocalDate(act.start_date);
     const diff = d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1);
-    const monday = new Date(d.setDate(diff)).toISOString().split('T')[0];
+    const monday = formatLocalDate(new Date(d.setDate(diff)));
     
     const stride = act.average_speed! / (act.cadence! / 60);
     const entry = weeklyMech.get(monday) || { totalCadence: 0, totalStride: 0, count: 0 };
