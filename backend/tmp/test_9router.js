@@ -22,9 +22,9 @@ async function test() {
     models.data.forEach(m => console.log("- " + m.id));
 
     // Tahap 2: Coba kirim chat
-    console.log("\nTrying to chat with model: runos/gemini-2.5-flash");
+    console.log("\nTrying to chat with model: gemini/gemini-2.5-flash");
     const response = await openai.chat.completions.create({
-      model: "runos/gemini-2.5-flash", 
+      model: "gemini/gemini-2.5-flash", 
       messages: [
         { role: "system", content: "You are a helpful assistant." },
         { role: "user", content: "Say hello!" }

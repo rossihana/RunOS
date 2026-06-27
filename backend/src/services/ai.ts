@@ -620,7 +620,7 @@ ATURAN MENJAWAB:
 `;
 
 export async function generateAIResponse(prompt: string, context?: string, systemPrompt?: string, isJson: boolean = true) {
-  const modelName = "runos/gemini-2.5-flash"; // Mengunci ke koneksi 'runos'
+  const modelName = "gemini/gemini-2.5-flash"; // Mengunci ke koneksi 'gemini'
   const fullPrompt = context ? `Context data:\n${context}\n\nUser Question/Request:\n${prompt}` : prompt;
   
   try {
