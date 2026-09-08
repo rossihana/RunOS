@@ -184,6 +184,7 @@ export default function ActivityDetail() {
       const hrStream = activity.streams.heartrate?.data;
       const altStream = activity.streams.altitude?.data;
       const paceStream = activity.streams.velocity_smooth?.data;
+      const cadenceStream = activity.streams.cadence?.data;
 
       if (distStream) {
           for (let i = 0; i < distStream.length; i++) {
@@ -199,7 +200,8 @@ export default function ActivityDetail() {
                   hr: hrStream ? hrStream[i] : null,
                   altitude: altStream ? altStream[i] : null,
                   pace: paceSecs > 0 ? paceSecs : null, // Store in seconds
-                  paceFormatted: paceStream && paceStream[i] > 0 ? formatPace(paceStream[i]) : '--'
+                  paceFormatted: paceStream && paceStream[i] > 0 ? formatPace(paceStream[i]) : '--',
+                  cadence: cadenceStream ? (cadenceStream[i] ?? null) : null
               });
           }
       }
@@ -470,6 +472,30 @@ export default function ActivityDetail() {
                                        formatter={paceTooltipFormatter as any}
                                    />
                                    <Line type="monotone" dataKey="pace" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false} />
+                               </LineChart>
+                           </ResponsiveContainer>
+                       </div>
+                   </div>
+               )}
+
+               {/* Cadence Chart */}
+               {chartData.length > 0 && chartData.some(d => d.cadence !== null) && (
+                   <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-5 shadow-sm">
+                       <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center mb-6">
+                           <Footprints className="w-4 h-4 text-violet-500 mr-2" /> Cadence
+                       </h3>
+                       <div className="h-48 w-full">
+                           <ResponsiveContainer width="100%" height="100%">
+                               <LineChart data={chartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+                                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#3f3f46" opacity={0.2} />
+                                   <XAxis dataKey="distance" minTickGap={30} tick={{fontSize: 12, fill: '#71717a'}} tickFormatter={(val) => `${val}km`} />
+                                   <YAxis tick={{fontSize: 12, fill: '#71717a'}} width={50} domain={['dataMin', 'dataMax']} />
+                                   <Tooltip
+                                      contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#fff', borderRadius: '8px' }}
+                                      labelFormatter={(val) => `${val} km`}
+                                       formatter={(val: any) => [`${Math.round(val ?? 0)} spm`, 'Cadence'] as any}
+                                   />
+                                   <Line type="monotone" dataKey="cadence" stroke="#a855f7" strokeWidth={2} dot={false} isAnimationActive={false} />
                                </LineChart>
                            </ResponsiveContainer>
                        </div>

@@ -1,8 +1,6 @@
 import { Router, Response } from 'express';
 import { query } from '../db.js';
 import { AuthRequest, authenticate } from '../middleware/auth.js';
-import axios from 'axios';
-import { getValidAccessToken } from '../services/strava.js';
 import { catchAsync } from '../utils/catchAsync.js';
 
 const router = Router();
@@ -10,7 +8,7 @@ const router = Router();
 router.get('/', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
   const result = await query(
     `SELECT 
-      id, strava_activity_id, name, distance, moving_time, elapsed_time,
+      id, garmin_activity_id, name, distance, moving_time, elapsed_time,
       average_speed, average_pace, max_speed, average_heartrate, max_heartrate,
       elevation_gain, start_date, start_date_local, map_polyline, details_fetched
      FROM activities 
@@ -58,7 +56,7 @@ router.post('/lab/config', authenticate, validateRequest(labConfigSchema), async
     const zones = computeZones(config);
     res.json({ config, zones });
   } catch (error) {
-    console.error('Error saving lab config:', error);
+    console.error('Error saving lab config: ', error);
     res.status(500).json({ error: 'Failed to save lab config' });
   }
 });
@@ -161,8 +159,8 @@ router.get('/:id', authenticate, validateRequest(activityIdSchema), catchAsync(a
 
   // 2. Fetch PRs achieved during this specific activity
   const prsResult = await query(
-    'SELECT name, distance, elapsed_time FROM best_efforts WHERE user_id = $1 AND strava_activity_id = $2',
-    [userId, activity.strava_activity_id]
+    'SELECT name, distance, elapsed_time FROM best_efforts WHERE user_id = $1 AND garmin_activity_id = $2',
+    [userId, activity.garmin_activity_id]
   );
 
   res.json({
@@ -171,213 +169,28 @@ router.get('/:id', authenticate, validateRequest(activityIdSchema), catchAsync(a
   });
 }));
 
+// ─── Best-effort sync endpoint ───
+// Data masuk dari scripts/garmin_sync.py (Garmin Connect → tabel activities).
+// Endpoint ini cuma menandai row yang belum lengkap supaya UI tahu statusnya.
+
 router.post('/sync', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
-  const userId = req.user?.id!;
-
-  const accessToken = await getValidAccessToken(userId);
-
-  if (!accessToken) {
-    // For mock users, generate some fake activities
-    const mockActivities = [
-      {
-        strava_activity_id: Date.now() + 1,
-        name: 'Morning Run',
-        distance: 5200,
-        moving_time: 1500,
-        elapsed_time: 1600,
-        average_speed: 3.46,
-        average_pace: '04:48',
-        average_heartrate: 145,
-        start_date: new Date().toISOString(),
-      },
-      {
-        strava_activity_id: Date.now() + 2,
-        name: 'Long Run',
-        distance: 15000,
-        moving_time: 4500,
-        elapsed_time: 4600,
-        average_speed: 3.33,
-        average_pace: '05:00',
-        average_heartrate: 155,
-        start_date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-      }
-    ];
-
-    for (const act of mockActivities) {
-      await query(`
-        INSERT INTO activities (
-          user_id, strava_activity_id, name, distance, moving_time, elapsed_time,
-          average_speed, average_pace, average_heartrate, start_date, start_date_local
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        ON CONFLICT (strava_activity_id) DO NOTHING
-      `, [userId, act.strava_activity_id, act.name, act.distance, act.moving_time,
-          act.elapsed_time, act.average_speed, act.average_pace, act.average_heartrate, act.start_date, act.start_date]); // Mock uses same for simplicity
-    }
-
-    return res.json({ success: true, message: 'Mock activities synced' });
-  }
-
-  // Real Strava Sync - Paginated to fetch history
-  let page = 1;
-  const perPage = 50;
-  let hasMore = true;
-  let synced = 0;
-
-  while (hasMore && page <= 5) { // Cap at 5 pages (250 activities) for safety per sync click
-    const response = await axios.get('https://www.strava.com/api/v3/athlete/activities', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: { per_page: perPage, page: page }
-    });
-
-    const activities = response.data;
-    if (activities.length === 0) {
-      hasMore = false;
-      break;
-    }
-
-    for (const act of activities) {
-      // Only sync runs
-      if (act.type !== 'Run') continue;
-
-      // Calculate average pace (mm:ss) from m/s
-      let avgPace = null;
-      if (act.average_speed) {
-        const paceSeconds = 1000 / act.average_speed;
-        const mins = Math.floor(paceSeconds / 60);
-        const secs = Math.floor(paceSeconds % 60);
-        avgPace = `${mins}:${secs.toString().padStart(2, '0')}`;
-      }
-
-      await query(`
-        INSERT INTO activities (
-          user_id, strava_activity_id, name, distance, moving_time, elapsed_time,
-          average_speed, average_pace, max_speed, average_heartrate, max_heartrate,
-          elevation_gain, start_date, start_date_local, map_polyline, cadence
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-        ON CONFLICT (strava_activity_id) DO UPDATE SET 
-          name = EXCLUDED.name,
-          distance = EXCLUDED.distance,
-          moving_time = EXCLUDED.moving_time,
-          elapsed_time = EXCLUDED.elapsed_time,
-          average_speed = EXCLUDED.average_speed,
-          average_pace = EXCLUDED.average_pace,
-          max_speed = EXCLUDED.max_speed,
-          average_heartrate = EXCLUDED.average_heartrate,
-          max_heartrate = EXCLUDED.max_heartrate,
-          elevation_gain = EXCLUDED.elevation_gain,
-          start_date = EXCLUDED.start_date,
-          start_date_local = EXCLUDED.start_date_local,
-          cadence = COALESCE(EXCLUDED.cadence, activities.cadence),
-          map_polyline = CASE 
-            WHEN EXCLUDED.map_polyline IS NOT NULL AND EXCLUDED.map_polyline <> '' 
-            THEN EXCLUDED.map_polyline 
-            ELSE activities.map_polyline 
-          END
-      `, [
-        userId, act.id, act.name, act.distance, act.moving_time, act.elapsed_time,
-        act.average_speed, avgPace, act.max_speed, act.average_heartrate,
-        act.max_heartrate, act.total_elevation_gain, act.start_date, act.start_date_local,
-        act.map?.summary_polyline,
-        // Strava returns average_cadence as steps per minute (SPM) for runs
-        // multiply by 2 to get full cadence (both feet) — standard running metric
-        act.average_cadence ? Math.round(act.average_cadence * 2) : null
-      ]);
-      synced++;
-    }
-    
-    if (activities.length < perPage) {
-      hasMore = false;
-    } else {
-      page++;
-    }
-  }
-
-  // --- 2. Smart Sync for Best Efforts ---
-  // Fetch details for up to 10 activities that we haven't checked for Best Efforts yet.
-  // This avoids hitting the Strava API rate limit (100 req / 15 min).
-  const activitiesNeedingDetails = await query(`
-    SELECT strava_activity_id FROM activities 
-    WHERE user_id = $1 AND details_fetched = FALSE
-    ORDER BY start_date DESC 
-    LIMIT 50
-  `, [userId]);
-
-  const targetCategories = ['5K', '10K', '15K', '20K', 'Half-Marathon', '30K', 'Marathon', '50K'];
-
-  console.log(`Need details for ${activitiesNeedingDetails.rows.length} activities`);
-
-  for (const row of activitiesNeedingDetails.rows) {
-    try {
-      console.log(`Fetching details for activity ${row.strava_activity_id}`);
-      const detailRes = await axios.get(`https://www.strava.com/api/v3/activities/${row.strava_activity_id}`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-
-      const bestEfforts = detailRes.data.best_efforts || [];
-      const splits = JSON.stringify(detailRes.data.splits_metric || []);
-      
-      // Fetch streams for charts and map (latlng, time, distance, heartrate, altitude, velocity_smooth)
-      let streams = null;
-      try {
-        const streamsRes = await axios.get(`https://www.strava.com/api/v3/activities/${row.strava_activity_id}/streams?keys=latlng,time,distance,heartrate,altitude,velocity_smooth&key_by_type=true`, {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        });
-        streams = JSON.stringify(streamsRes.data);
-      } catch (streamError: any) {
-        console.error(`Error fetching streams for activity ${row.strava_activity_id}:`, streamError.message);
-      }
-
-      for (const effort of bestEfforts) {
-        if (targetCategories.includes(effort.name)) {
-          // Upsert best effort: only update if the new elapsed_time is faster (smaller) than the existing one
-          await query(`
-            INSERT INTO best_efforts (
-              user_id, name, distance, elapsed_time, moving_time, start_date, start_date_local, strava_activity_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            ON CONFLICT (user_id, name) 
-            DO UPDATE SET 
-              distance = EXCLUDED.distance,
-              elapsed_time = EXCLUDED.elapsed_time,
-              moving_time = EXCLUDED.moving_time,
-              start_date = EXCLUDED.start_date,
-              start_date_local = EXCLUDED.start_date_local,
-              strava_activity_id = EXCLUDED.strava_activity_id
-            WHERE EXCLUDED.elapsed_time < best_efforts.elapsed_time
-          `, [
-            userId, effort.name, effort.distance, effort.elapsed_time, 
-            effort.moving_time, effort.start_date, effort.start_date_local, row.strava_activity_id
-          ]);
-        }
-      }
-
-      // Mark as fetched and save splits and streams
-      // Also update map_polyline if it was missing from the summary
-      const polyline = detailRes.data.map?.polyline || detailRes.data.map?.summary_polyline;
-      // average_cadence from Strava = steps per minute (one foot). ×2 = full SPM.
-      const cadenceFromDetail = detailRes.data.average_cadence
-        ? Math.round(detailRes.data.average_cadence * 2)
-        : null;
-
-      await query(`
-        UPDATE activities 
-        SET 
-          details_fetched = TRUE, 
-          splits = $2, 
-          streams = $3,
-          cadence = COALESCE($5, cadence),
-          map_polyline = CASE 
-            WHEN map_polyline IS NULL OR map_polyline = '' THEN $4 
-            ELSE map_polyline 
-          END
-        WHERE strava_activity_id = $1
-      `, [row.strava_activity_id, splits, streams, polyline, cadenceFromDetail]);
-    } catch (detailError: any) {
-      console.error(`Error fetching details for activity ${row.strava_activity_id}:`, detailError.response?.data || detailError.message);
-      // Continue to the next one even if this one fails
-    }
-  }
-
-  res.json({ success: true, count: synced });
+  const result = await query(
+    `SELECT
+       COUNT(*) FILTER (WHERE splits IS NULL) AS without_splits,
+       COUNT(*) FILTER (WHERE streams IS NULL) AS without_streams,
+       COUNT(*) AS total
+     FROM activities WHERE user_id = $1`,
+    [req.user?.id]
+  );
+  const s = result.rows[0];
+  res.json({
+    success: true,
+    source: 'garmin',
+    total: Number(s.total),
+    without_splits: Number(s.without_splits),
+    without_streams: Number(s.without_streams),
+    message: `Data tersinkron via Garmin (${s.total} aktivitas). Backfill detail: jalankan scripts/garmin_sync.py --details.`
+  });
 }));
 
 router.get('/analytics/readiness', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {

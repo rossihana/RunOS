@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Activity, LayoutDashboard, Flag, LogOut, Menu, Sparkles, ClipboardList, FlaskConical } from 'lucide-react';
+import { Activity, LayoutDashboard, Flag, LogOut, Menu, Sparkles, ClipboardList, FlaskConical, Cpu } from 'lucide-react';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import api from '../../services/api';
@@ -28,12 +28,13 @@ export default function Layout() {
     }
   };
 
-  const navItems = [
+  const navItems: { path: string; label: string; icon: any; desktopOnly?: boolean }[] = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/activities', label: 'Activities', icon: Activity },
     { path: '/training', label: 'Training', icon: ClipboardList },
     { path: '/races', label: 'Races', icon: Flag },
     { path: '/ai-coach', label: 'AI Coach', icon: Sparkles },
+    { path: '/ai-settings', label: 'AI Settings', icon: Cpu, desktopOnly: true },
     { path: '/lab', label: 'Perf. Lab', icon: FlaskConical },
   ];
 
@@ -152,7 +153,7 @@ export default function Layout() {
       {/* Mobile Bottom Navigation */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 pb-safe transition-colors">
         <div className="flex justify-around items-center h-16">
-          {navItems.map((item) => {
+          {navItems.filter(i => !i.desktopOnly).map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
             

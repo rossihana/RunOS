@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => {
       // In dev, proxy /api calls to the local backend
       proxy: {
         '/api': {
-          target: env.VITE_API_URL || 'http://localhost:3000',
+          target: env.VITE_API_URL || 'http://localhost:3001',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, '/api'),
         },

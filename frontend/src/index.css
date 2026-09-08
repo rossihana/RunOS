@@ -10,7 +10,7 @@
 @layer base {
   :root {
     --chart-distance: #18181b; /* zinc-900 */
-    --chart-pace: #FC4C02; /* Strava orange */
+    --chart-pace: #FC4C02; /* brand orange */
     --bg-card: #ffffff;
   }
 

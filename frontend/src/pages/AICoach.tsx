@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Sparkles, ArrowLeft } from 'lucide-react';
+import { Send, Bot, User, Sparkles, ArrowLeft, Trash2, Settings } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 import ReactMarkdown from 'react-markdown';
@@ -10,15 +10,13 @@ interface Message {
 }
 
 export default function AICoach() {
-  const [messages, setMessages] = useState<Message[]>([
-    { 
-      role: 'assistant', 
-      content: 'Halo! Saya **RunOS AI Coach**. Saya telah menganalisa data lari kamu belakangan ini. Ada yang ingin kamu tanyakan tentang performa atau menu latihanmu?' 
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [chatModel, setChatModel] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [chatWidth, setChatWidth] = useState(() => Number(localStorage.getItem('runos_chat_width')) || 896);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -26,32 +24,138 @@ export default function AICoach() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, loading]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [h, s] = await Promise.all([
+          api.get('/ai/chat/history'),
+          api.get('/ai/settings'),
+        ]);
+        const history: Message[] = (h.data || []).map((r: any) => ({ role: r.role, content: r.content }));
+        if (history.length > 0) {
+          setMessages(history);
+        } else {
+          setMessages([{
+            role: 'assistant',
+            content: 'Halo! Saya **RunOS AI Coach**. Saya telah menganalisa data lari kamu belakangan ini. Ada yang ingin kamu tanyakan tentang performa atau menu latihanmu?'
+          }]);
+        }
+        setChatModel(s.data.features?.chat || s.data.defaultModel || 'default (9router)');
+      } catch (e) {
+        console.error('Gagal memuat chat:', e);
+        setMessages([{
+          role: 'assistant',
+          content: 'Halo! Saya **RunOS AI Coach**. Ada yang ingin kamu tanyakan?'
+        }]);
+      } finally {
+        setLoaded(true);
+      }
+    })();
+  }, []);
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
 
     const userMessage = input.trim();
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setMessages(prev => [...prev, { role: 'user', content: userMessage }, { role: 'assistant', content: '' }]);
     setLoading(true);
+    const updateLast = (fn: (c: string) => string) =>
+      setMessages(prev => {
+        const next = [...prev];
+        next[next.length - 1] = { role: 'assistant', content: fn(next[next.length - 1].content) };
+        return next;
+      });
 
     try {
-      const response = await api.post('/ai/chat', { message: userMessage });
-      setMessages(prev => [...prev, { role: 'assistant', content: response.data.response }]);
-    } catch (error) {
+      const response = await fetch(`${api.defaults.baseURL}/ai/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+        body: JSON.stringify({ message: userMessage, stream: true }),
+      });
+
+      if (!response.ok || !response.body) {
+        const err = await response.json().catch(() => null);
+        throw new Error(err?.error || err?.message || 'Koneksi gagal');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+        for (const part of parts) {
+          const evMatch = part.match(/^event: (.+)$/m);
+          const dataMatch = part.match(/^data: (.+)$/m);
+          if (!evMatch || !dataMatch) continue;
+          const ev = evMatch[1].trim();
+          const data = JSON.parse(dataMatch[1]);
+          if (ev === 'delta') updateLast(c => c + data.text);
+          else if (ev === 'error') updateLast(() => `⚠️ ${data.message}`);
+        }
+      }
+    } catch (error: any) {
       console.error('Failed to chat with AI:', error);
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Maaf, saya sedang mengalami gangguan koneksi. Bisa coba lagi nanti?' }]);
+      const msg = error?.message || 'Maaf, saya sedang mengalami gangguan koneksi. Bisa coba lagi nanti?';
+      updateLast(c => c ? c : `⚠️ ${msg}`);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleClear = async () => {
+    if (!confirm('Hapus semua riwayat percakapan?')) return;
+    try { await api.delete('/ai/chat/history'); } catch { /* ignore */ }
+    setMessages([{
+      role: 'assistant',
+      content: 'Riwayat dihapus. Mau tanya apa hari ini?'
+    }]);
+  };
+
+  // ── Resize: drag handle di tepi kiri ──
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = chatWidth;
+    const onMove = (ev: MouseEvent) => {
+      const w = Math.min(Math.max(560, startW + (startX - ev.clientX)), window.innerWidth - 60);
+      setChatWidth(w);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      setChatWidth(w => {
+        localStorage.setItem('runos_chat_width', String(w));
+        return w;
+      });
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  const currentChatModel = chatModel;
+
   return (
-    <div className="flex flex-col h-[calc(100vh-140px)] max-w-4xl mx-auto">
+    <div className="flex flex-col mx-auto" style={{ width: chatWidth, maxWidth: '100%' }}>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
+          {/* Resize handle */}
+          <div
+            onMouseDown={startResize}
+            className="hidden md:block w-1.5 h-10 rounded-full cursor-col-resize bg-zinc-200 dark:bg-zinc-800 hover:bg-orange-400 dark:hover:bg-orange-600 transition-colors"
+            title="Tarik untuk mengubah lebar chat"
+          />
           <Link to="/" className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-500">
             <ArrowLeft className="w-5 h-5" />
           </Link>
@@ -59,51 +163,62 @@ export default function AICoach() {
             <h1 className="text-2xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
               AI Coach <Sparkles className="w-5 h-5 text-orange-500 fill-orange-500" />
             </h1>
-            <p className="text-sm text-zinc-500">Analitik tapi Mendukung • Powered by Gemini</p>
+            <p className="text-sm text-zinc-500 truncate max-w-[280px]" title={currentChatModel}>Model: {currentChatModel}</p>
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/ai-settings"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+            title="Pengaturan AI: model per fitur & provider sendiri"
+          >
+            <Settings className="w-4 h-4" /> Pengaturan AI
+          </Link>
+          <button
+            onClick={handleClear}
+            className="p-2 rounded-xl text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+            title="Hapus riwayat"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
       {/* Chat Container */}
-      <div className="flex-1 bg-white dark:bg-zinc-900 rounded-3xl shadow-sm border border-zinc-200 dark:border-zinc-800 flex flex-col overflow-hidden">
-        {/* Messages List */}
+      <div className="h-[calc(100vh-160px)] bg-white dark:bg-zinc-900 rounded-3xl shadow-sm border border-zinc-200 dark:border-zinc-800 flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {messages.map((m, i) => (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`flex gap-3 max-w-[85%] ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                  m.role === 'user' ? 'bg-zinc-100 dark:bg-zinc-800' : 'bg-orange-100 dark:bg-orange-900 text-orange-600 dark:text-orange-400'
-                }`}>
-                  {m.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-                </div>
-                <div className={`p-4 rounded-2xl text-sm leading-relaxed ${
-                  m.role === 'user' 
-                    ? 'bg-orange-600 text-white font-medium rounded-tr-none' 
-                    : 'bg-zinc-50 dark:bg-zinc-800/50 text-zinc-800 dark:text-zinc-200 border border-zinc-100 dark:border-zinc-800 rounded-tl-none'
-                }`}>
-                  <div className="prose dark:prose-invert prose-sm max-w-none">
-                    <ReactMarkdown>{m.content}</ReactMarkdown>
+          {loaded && messages.map((m, i) => {
+            const isLast = i === messages.length - 1;
+            const showDots = loading && isLast && m.role === 'assistant' && m.content === '';
+            return (
+              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`flex gap-3 max-w-[85%] ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                    m.role === 'user' ? 'bg-zinc-100 dark:bg-zinc-800' : 'bg-orange-100 dark:bg-orange-900 text-orange-600 dark:text-orange-400'
+                  }`}>
+                    {m.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                  </div>
+                  <div className={`p-4 rounded-2xl text-sm leading-relaxed ${
+                    m.role === 'user'
+                      ? 'bg-orange-600 text-white font-medium rounded-tr-none'
+                      : 'bg-zinc-50 dark:bg-zinc-800/50 text-zinc-800 dark:text-zinc-200 border border-zinc-100 dark:border-zinc-800 rounded-tl-none'
+                  }`}>
+                    {showDots ? (
+                      <div className="flex gap-1 py-1">
+                        <div className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <div className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <div className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    ) : (
+                      <div className="prose dark:prose-invert prose-sm max-w-none">
+                        <ReactMarkdown>{m.content}</ReactMarkdown>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
-          {loading && (
-            <div className="flex justify-start">
-              <div className="flex gap-3 max-w-[80%]">
-                <div className="w-8 h-8 rounded-full bg-orange-100 dark:bg-orange-900 text-orange-600 dark:text-orange-400 flex items-center justify-center animate-pulse">
-                  <Bot className="w-4 h-4" />
-                </div>
-                <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl rounded-tl-none border border-zinc-100 dark:border-zinc-800">
-                  <div className="flex gap-1">
-                    <div className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <div className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <div className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+            );
+          })}
           <div ref={messagesEndRef} />
         </div>
 

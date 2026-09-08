@@ -3,8 +3,261 @@ import { env } from '../config/env.js';
 
 const openai = new OpenAI({
   apiKey: env.GEMINI_API_KEY || 'no-key',
-  baseURL: env.NINEROUTER_BASE_URL
+  baseURL: env.NINEROUTER_BASE_URL,
+  timeout: 60_000,     // failover cepat ke model fallback kalau channel lambat/mati
+  maxRetries: 0,
 });
+export { openai };
+
+// ─── Model selection & fallback chain ───
+// Default mengikuti konfigurasi lama. User bebas memilih model apa pun yang
+// dikenal 9router (gemini/..., groq/..., ag/..., dll) via GET /ai/models + POST /ai/model.
+// Sejak 09-08: tiap fitur bisa punya model sendiri + user bisa menambah provider
+// sendiri (OpenAI-compatible: base URL + API key) — lihat getAISettings/resolveForFeature.
+
+export const DEFAULT_MODEL = "gemini/gemini-3.8-flash";
+// Channel sehat hasil probe 09-07: 3.8 bersih & cepat; 3.7/3.6 valid tapi kerap
+// menambah postamble (ditangani extractJson); 2.5-flash & gemma-4 rusak/503.
+export const FALLBACK_MODELS = ["gemini/gemini-3.8-flash", "gemini/gemini-3.7-flash"];
+
+// ─── Pengaturan AI per user (per fitur + provider custom) ───
+
+export interface AISettings {
+  defaultModel?: string | null;
+  features?: Record<string, string | null>;   // chat | dashboard | prediction | plan | merge
+  customProviders?: Record<string, { baseUrl: string; apiKey: string }>; // nama -> kredensial
+  /** Internal: false = model eksplisit dipilih user -> JANGAN silent-fallback ke model lain */
+  allowFallback?: boolean;
+}
+
+/** Resolve model untuk satu fitur + aturan fallback:
+ *  user eksplisit memilih (feature override / defaultModel) -> strict (no fallback);
+ *  tidak memilih (pakai DEFAULT_MODEL) -> boleh fallback chain. */
+export function featureModel(feature: string, settings: AISettings): { model: string; settings: AISettings } {
+  const chosen = settings.features?.[feature] || settings.defaultModel || null;
+  return {
+    model: chosen || DEFAULT_MODEL,
+    settings: { ...settings, allowFallback: !chosen },
+  };
+}
+
+export async function getAISettings(userId: number): Promise<AISettings> {
+  const r = await import('../db.js');
+  const res = await r.query('SELECT ai_settings FROM users WHERE id = $1', [userId]);
+  return res.rows[0]?.ai_settings || {};
+}
+
+/** Klien untuk satu panggilan: provider custom user kalau model berformat "provider:model", else 9router. */
+export function clientFor(model: string, settings: AISettings): OpenAI {
+  const m = /^([a-zA-Z0-9_-]+):(.+)$/.exec(model);
+  if (m && settings.customProviders?.[m[1]]) {
+    const p = settings.customProviders[m[1]];
+    return new OpenAI({ apiKey: p.apiKey, baseURL: p.baseUrl, timeout: 60_000, maxRetries: 0 });
+  }
+  return openai;
+}
+
+/** Nama model murni (tanpa prefix provider custom). */
+export function bareModel(model: string): string {
+  const m = /^([a-zA-Z0-9_-]+):(.+)$/.exec(model);
+  return m && m[2] ? m[2] : model;
+}
+
+/** Resolve model utk satu fitur: override fitur > default user > global default. */
+export function resolveForFeature(feature: string, settings: AISettings): string {
+  return settings.features?.[feature] || settings.defaultModel || DEFAULT_MODEL;
+}
+
+/** Simpan OpenAI-compatible error ke pesan ringkas. */
+function errMsg(err: unknown): string {
+  return String((err as any)?.message || err).slice(0, 150);
+}
+
+const AUTH_ERR = /401|invalid api key/i;
+
+export function resolveModel(userModel?: string | null): string {
+  return userModel || DEFAULT_MODEL;
+}
+
+// ─── Validasi & parsing respons JSON ───
+
+export class AIResponseError extends Error {
+  statusCode: number;
+  isOperational = true;
+  constructor(message: string, statusCode = 502) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+// Ekstrak objek JSON seimbang dari teks yang mungkin punya sampah sebelum/sesudah
+// (fence markdown, catatan trailing dari upstream model, dll).
+function extractJson(text: string): string {
+  const start = text.indexOf('{');
+  if (start === -1) return text;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return text.slice(start);
+}
+
+export async function generateAIJson<T>(
+  prompt: string,
+  context: string | undefined,
+  systemPrompt: string,
+  model: string,
+  validate: (data: unknown) => T,
+  settings: AISettings = {}
+): Promise<T> {
+  const fullPrompt = context ? `Context data:\n${context}\n\nUser Question/Request:\n${prompt}` : prompt;
+  const models = settings.allowFallback === false ? [model] : [model, ...FALLBACK_MODELS.filter(f => f !== model)];
+  const errors: string[] = [];
+  for (const m of models) {
+    const client = clientFor(m, settings);
+    try {
+      const response = await client.chat.completions.create({
+        model: bareModel(m),
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: fullPrompt }
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: 8192,
+      });
+      const choice = response.choices[0];
+      let text = (choice.message.content || "").trim();
+      if (choice.finish_reason === "length") {
+        throw new AIResponseError("Respons AI terpotong (output token habis)");
+      }
+      text = extractJson(text);
+      let data: unknown;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new AIResponseError(`JSON tidak valid (akhir): ${text.slice(-150) || "(kosong)"}`);
+      }
+      return validate(data); // zod .parse -> lempar jika bentuknya salah
+    } catch (err) {
+      const msg = err instanceof AIResponseError ? err.message : errMsg(err);
+      errors.push(`${m}: ${msg}`);
+      // Error kredensial -> tidak ada gunanya coba model lain
+      if (AUTH_ERR.test(msg)) break;
+    }
+  }
+  if (errors.some(e => /terpotong/.test(e))) {
+    throw new AIResponseError("Respons AI terpotong (output token habis)", 502);
+  }
+  throw new AIResponseError(`AI gagal menghasilkan JSON valid — ${errors.join(" | ").slice(0, 400)}`, 502);
+}
+
+export async function generateAIText(
+  prompt: string,
+  context: string | undefined,
+  systemPrompt: string,
+  model: string,
+  settings: AISettings = {}
+): Promise<string> {
+  const fullPrompt = context ? `Context data:\n${context}\n\nUser Question/Request:\n${prompt}` : prompt;
+  return generateAIChat(
+    [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: fullPrompt }
+    ],
+    model,
+    settings
+  );
+}
+
+export async function generateAIChat(
+  messages: { role: string; content: string }[],
+  model: string,
+  settings: AISettings = {}
+): Promise<string> {
+  const models = settings.allowFallback === false ? [model] : [model, ...FALLBACK_MODELS.filter(f => f !== model)];
+  let lastErr: unknown;
+  for (const m of models) {
+    const client = clientFor(m, settings);
+    try {
+      const response = await client.chat.completions.create({
+        model: bareModel(m),
+        messages: messages as any,
+      });
+      // Bersihkan postamble "→ skipped: ..." yang kadang ditambahkan upstream
+      return (response.choices[0].message.content || "").replace(/\n?→ skipped:.*$/s, "").trim();
+    } catch (err) {
+      lastErr = err;
+      const msg = errMsg(err);
+      if (AUTH_ERR.test(msg)) break;
+      console.error(`[AI] model ${m} gagal: ${msg} — coba fallback`);
+    }
+  }
+  const status = (lastErr as any)?.status === 429 ? 429 : 502;
+  throw new AIResponseError(
+    status === 429 ? "AI sedang kelebihan beban (rate limit). Coba lagi sebentar." : "AI gagal merespons",
+    status
+  );
+}
+
+export async function generateAIChatStream(
+  messages: { role: string; content: string }[],
+  model: string,
+  onDelta: (text: string) => void,
+  settings: AISettings = {}
+): Promise<string> {
+  const models = settings.allowFallback === false ? [model] : [model, ...FALLBACK_MODELS.filter(f => f !== model)];
+  let lastErr: unknown;
+  for (const m of models) {
+    const client = clientFor(m, settings);
+    try {
+      const stream = await client.chat.completions.create({
+        model: bareModel(m),
+        messages: messages as any,
+        stream: true,
+      });
+      let full = "";
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content || "";
+        if (delta) {
+          full += delta;
+          onDelta(delta);
+        }
+      }
+      return full.replace(/\n?→ skipped:.*$/s, "").trim();
+    } catch (err) {
+      lastErr = err;
+      const msg = errMsg(err);
+      if (AUTH_ERR.test(msg)) break;
+      console.error(`[AI stream] model ${m} gagal: ${msg} — coba fallback`);
+    }
+  }
+  const status = (lastErr as any)?.status === 429 ? 429 : 502;
+  throw new AIResponseError(
+    status === 429 ? "AI sedang kelebihan beban (rate limit). Coba lagi sebentar." : "AI gagal merespons",
+    status
+  );
+}
+
+export async function listAIModels(): Promise<string[]> {
+  try {
+    const res = await openai.models.list();
+    return (res.data || []).map(m => m.id).filter(Boolean).sort();
+  } catch {
+    return [];
+  }
+}
 
 export const AI_COACH_SYSTEM_PROMPT = `
 Kamu adalah pelatih lari pribadi yang cerdas dan adaptif. 

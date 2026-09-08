@@ -2,10 +2,9 @@ import { pgTable, serial, bigint, text, integer, real, timestamp, boolean, jsonb
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
-  stravaAthleteId: bigint('strava_athlete_id', { mode: 'bigint' }).unique().notNull(),
-  accessToken: text('access_token'),
-  refreshToken: text('refresh_token'),
-  tokenExpiresAt: bigint('token_expires_at', { mode: 'number' }),
+  email: text('email').unique(),
+  passwordHash: text('password_hash'),
+  stravaAthleteId: bigint('strava_athlete_id', { mode: 'bigint' }),
   firstName: text('first_name'),
   lastName: text('last_name'),
   profilePicture: text('profile_picture'),
@@ -18,7 +17,7 @@ export const users = pgTable('users', {
 export const activities = pgTable('activities', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  stravaActivityId: bigint('strava_activity_id', { mode: 'bigint' }).unique().notNull(),
+  garminActivityId: bigint('garmin_activity_id', { mode: 'bigint' }).unique().notNull(),
   name: text('name'),
   distance: real('distance'),
   movingTime: integer('moving_time'),
@@ -50,7 +49,7 @@ export const races = pgTable('races', {
   prediction: jsonb('prediction'),
   trainingPlan: jsonb('training_plan'),
   linkedActivityId: integer('linked_activity_id').references(() => activities.id, { onDelete: 'set null' }),
-  activityStravaId: bigint('activity_strava_id', { mode: 'bigint' }),
+  activityGarminId: bigint('activity_garmin_id', { mode: 'bigint' }),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -63,7 +62,7 @@ export const bestEfforts = pgTable('best_efforts', {
   movingTime: integer('moving_time').notNull(),
   startDate: timestamp('start_date').notNull(),
   startDateLocal: text('start_date_local'),
-  stravaActivityId: bigint('strava_activity_id', { mode: 'bigint' }).notNull(),
+  garminActivityId: bigint('garmin_activity_id', { mode: 'bigint' }).notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 }, (t) => ({
   unq: unique().on(t.userId, t.name)

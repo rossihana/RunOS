@@ -118,7 +118,7 @@ export default function Activities() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">Activity History</h1>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            {activities.length > 0 ? `${filteredAndSortedActivities.length} of ${activities.length} runs` : 'All your imported runs from Strava.'}
+            {activities.length > 0 ? `${filteredAndSortedActivities.length} of ${activities.length} runs` : 'All your synced runs from Garmin.'}
           </p>
         </div>
         
@@ -165,7 +165,7 @@ export default function Activities() {
             </div>
             <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">No Runs Analyzed Yet</h3>
             <p className="max-w-sm mx-auto text-zinc-500 dark:text-zinc-400">
-              Connect your Strava account and head to the dashboard to sync your recent activities. Your journey starts here.
+              Sinkronkan aktivitas lari kamu dari Garmin Connect. Perjalananmu dimulai di sini.
             </p>
           </div>
         ) : filteredAndSortedActivities.length === 0 ? (

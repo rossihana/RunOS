@@ -7,7 +7,6 @@ const JWT_SECRET = env.JWT_SECRET;
 export interface AuthRequest extends Request {
   user?: {
     id: number;
-    strava_athlete_id: number;
   };
 }
 
@@ -24,7 +23,7 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; strava_athlete_id: number };
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: number };
     req.user = decoded;
     next();
   } catch (err) {

@@ -1,6 +1,6 @@
 // src/utils/polyline.ts
 /**
- * Decodes a Strava polyline into an array of [lat, lng] coordinates
+ * Decodes an encoded polyline into an array of [lat, lng] coordinates
  * https://developers.google.com/maps/documentation/utilities/polylinealgorithm
  */
 export function decodePolyline(str: string, precision: number = 5): [number, number][] {

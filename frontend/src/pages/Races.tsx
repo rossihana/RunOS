@@ -13,9 +13,7 @@ import {
   FileText,
   Split,
   Award,
-  CheckCircle,
-  ExternalLink,
-  ChevronRight,
+  CheckCircle,  ChevronRight,
   Search,
   RefreshCw,
   History,
@@ -42,7 +40,7 @@ interface Race {
   activity_moving_time?: number;
   activity_average_pace?: string;
   activity_start_date?: string;
-  activity_strava_id?: string;
+  activity_garmin_id?: string;
 }
 
 export default function Races() {
@@ -747,16 +745,6 @@ export default function Races() {
               <Activity className="w-3.5 h-3.5" /> View Details
             </Link>
           )}
-          {isPast && race.activity_strava_id && (
-            <a 
-              href={`https://www.strava.com/activities/${race.activity_strava_id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 py-2 rounded-xl text-xs font-bold hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-all flex items-center justify-center gap-2"
-            >
-              <ExternalLink className="w-3.5 h-3.5 text-zinc-400" /> Strava Details
-            </a>
-          )}
         </div>
       </div>
     );
@@ -798,12 +786,12 @@ export default function Races() {
             {loadingActivities ? (
               <div className="flex flex-col items-center justify-center py-12 gap-3">
                  <div className="w-8 h-8 border-4 border-zinc-200 border-t-orange-600 rounded-full animate-spin"></div>
-                 <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Loading Strava Activities...</span>
+                 <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Loading Activities...</span>
               </div>
             ) : filteredActivities.length === 0 ? (
               <div className="text-center py-12">
                  <p className="text-sm text-zinc-500">
-                   {searchQuery ? `No activities found matching "${searchQuery}"` : "No activities found. Try syncing with Strava first."}
+                   {searchQuery ? `No activities found matching "${searchQuery}"` : "No activities found. Jalankan sync Garmin dulu."}
                  </p>
               </div>
             ) : (

@@ -20,7 +20,7 @@ export default function CadenceCard({ avgCadence }: Props) {
       : avgCadence < 175
       ? `Cadence ${avgCadence} spm sudah di jalur yang baik. Target idealnya ≥180 spm untuk efisiensi penuh.`
       : `Cadence ${avgCadence} spm sudah optimal! Ini mengurangi risiko cedera dan meningkatkan efisiensi energi.`
-    : 'Data cadence belum tersedia. Lakukan "Sync Strava" ulang dari halaman Activities agar data cadence dari jam tanganmu tersimpan.';
+    : 'Data cadence belum tersedia. Jalankan scripts/garmin_sync.py --details agar data cadence dari jam tanganmu tersimpan.';
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6">

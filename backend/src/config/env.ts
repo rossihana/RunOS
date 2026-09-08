@@ -6,9 +6,6 @@ const envSchema = z.object({
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string().url(),
   JWT_SECRET: z.string().min(8),
-  STRAVA_CLIENT_ID: z.string(),
-  STRAVA_CLIENT_SECRET: z.string(),
-  STRAVA_REDIRECT_URI: z.string().url(),
   GEMINI_API_KEY: z.string().optional(),
   NINEROUTER_BASE_URL: z.string().url().default('http://localhost:20128/v1'),
 });

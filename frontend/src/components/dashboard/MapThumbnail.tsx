@@ -62,7 +62,7 @@ export default function MapThumbnail({ polyline, className = '' }: MapThumbnailP
         <path
           d={path}
           fill="none"
-          stroke="#FC4C02" // Strava Orange
+          stroke="#FC4C02" // running-app orange
           strokeWidth="3"
           strokeLinecap="round"
           strokeLinejoin="round"

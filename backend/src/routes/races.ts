@@ -14,7 +14,7 @@ router.get('/', authenticate, catchAsync(async (req: AuthRequest, res: Response)
       a.moving_time as activity_moving_time,
       a.average_pace as activity_average_pace,
       a.start_date as activity_start_date,
-      a.strava_activity_id as activity_strava_id
+      a.garmin_activity_id as activity_garmin_id
     FROM races r
     LEFT JOIN activities a ON r.linked_activity_id = a.id
     WHERE r.user_id = $1 

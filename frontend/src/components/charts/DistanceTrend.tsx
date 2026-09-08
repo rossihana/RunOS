@@ -138,7 +138,7 @@ export default function DistanceTrend({ data }: DistanceTrendProps) {
             </AreaChart>
           </ResponsiveContainer>
           
-          {/* Vertical white end line matching Strava's UI */}
+          {/* Vertical white end line matching classic running-app UI */}
           <div className="absolute top-[10px] bottom-[38px] right-[48px] w-[2px] bg-zinc-200 dark:bg-zinc-800" />
         </div>
       </div>

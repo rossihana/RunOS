@@ -1,18 +1,160 @@
 import { Router, Response, Request } from 'express';
 import { query } from '../db.js';
 import { AuthRequest, authenticate } from '../middleware/auth.js';
-import { 
-  generateAIResponse, 
-  AI_COACH_SYSTEM_PROMPT, 
-  RACE_PREDICTION_SYSTEM_PROMPT, 
+import {
+  generateAIJson,
+  generateAIText,
+  generateAIChat,
+  generateAIChatStream,
+  listAIModels,
+  getAISettings,
+  featureModel,
+  clientFor,
+  bareModel,
+  DEFAULT_MODEL,
+  AIResponseError,
+  AI_COACH_SYSTEM_PROMPT,
+  RACE_PREDICTION_SYSTEM_PROMPT,
   TRAINING_PLAN_SYSTEM_PROMPT,
   SMART_MERGE_SYSTEM_PROMPT,
   CHAT_SYSTEM_PROMPT
 } from '../services/ai.js';
+import { estimateVO2Max } from '../services/analytics.js';
+import { z } from 'zod';
 import { format } from 'date-fns';
 import { catchAsync } from '../utils/catchAsync.js';
 
 const router = Router();
+
+// ─── Rate limit sederhana untuk chat (20 pesan/menit/user) ───
+const chatHits = new Map<number, number[]>();
+function chatRateLimited(userId: number): boolean {
+  const now = Date.now();
+  const hits = (chatHits.get(userId) || []).filter(t => now - t < 60_000);
+  if (hits.length >= 20) return true;
+  hits.push(now);
+  chatHits.set(userId, hits);
+  return false;
+}
+
+// ─── Model & provider per user ───
+// defaultModel + per-feature override + custom provider (BYOK, OpenAI-compatible).
+// Model custom berformat "provider:model". API key provider TIDAK pernah dikirim balik ke klien.
+
+const MODEL_RE = /^[a-zA-Z0-9._\-\/:]{1,150}$/;
+const PROVIDER_NAME_RE = /^[a-zA-Z0-9_-]{1,30}$/;
+const AI_FEATURES = ['chat', 'dashboard', 'activity', 'prediction', 'plan', 'merge'] as const;
+
+router.get('/models', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const settings = await getAISettings(req.user?.id!);
+  const catalog = await listAIModels();
+  // Katalog provider custom (best-effort — provider mati tidak boleh merusak endpoint)
+  const custom: { name: string; models: string[]; error?: string }[] = [];
+  for (const [name, p] of Object.entries(settings.customProviders || {})) {
+    try {
+      const c = clientFor(`${name}:x`, settings);
+      const list = await c.models.list();
+      custom.push({ name, models: (list.data || []).map(m => m.id).filter(Boolean).slice(0, 100) });
+    } catch (e: any) {
+      custom.push({ name, models: [], error: String(e?.message || e).slice(0, 120) });
+    }
+  }
+  res.json({
+    models: catalog,
+    custom,
+    default: settings.defaultModel || DEFAULT_MODEL,
+    features: settings.features || {}
+  });
+}));
+
+router.get('/settings', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const s = await getAISettings(req.user?.id!);
+  res.json({
+    defaultModel: s.defaultModel || null,
+    features: s.features || {},
+    providers: Object.entries(s.customProviders || {}).map(([name, p]) => ({ name, baseUrl: p.baseUrl }))
+  });
+}));
+
+router.put('/settings', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const { defaultModel, features } = req.body || {};
+  const s = await getAISettings(req.user?.id!);
+
+  if (defaultModel !== undefined) {
+    if (defaultModel !== null && (typeof defaultModel !== 'string' || !MODEL_RE.test(defaultModel))) {
+      return res.status(400).json({ error: 'Model tidak valid' });
+    }
+    s.defaultModel = defaultModel;
+  }
+  if (features !== undefined) {
+    if (typeof features !== 'object' || features === null) {
+      return res.status(400).json({ error: 'features tidak valid' });
+    }
+    for (const [k, v] of Object.entries(features as Record<string, unknown>)) {
+      if (!(AI_FEATURES as readonly string[]).includes(k)) {
+        return res.status(400).json({ error: `Fitur tidak dikenal: ${k}` });
+      }
+      if (v !== null && (typeof v !== 'string' || !MODEL_RE.test(v))) {
+        return res.status(400).json({ error: `Model tidak valid untuk fitur ${k}` });
+      }
+      s.features = s.features || {};
+      if (v === null) delete s.features[k];
+      else s.features[k] = v as string;
+    }
+  }
+  await query('UPDATE users SET ai_settings = $1 WHERE id = $2', [JSON.stringify(s), req.user?.id]);
+  res.json({ success: true, defaultModel: s.defaultModel || null, features: s.features || {} });
+}));
+
+// Provider custom: tambah/update (BYOK — key disimpan di server, tak pernah dikirim balik)
+router.put('/providers', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const { name, baseUrl, apiKey } = req.body || {};
+  if (typeof name !== 'string' || !PROVIDER_NAME_RE.test(name)) {
+    return res.status(400).json({ error: 'Nama provider tidak valid (huruf/angka/-/_ , maks 30)' });
+  }
+  if (typeof baseUrl !== 'string' || !/^https?:\/\/.+/.test(baseUrl) || baseUrl.length > 300) {
+    return res.status(400).json({ error: 'Base URL tidak valid (harus http/https)' });
+  }
+  if (typeof apiKey !== 'string' || apiKey.length < 8 || apiKey.length > 300) {
+    return res.status(400).json({ error: 'API key tidak valid' });
+  }
+  const s = await getAISettings(req.user?.id!);
+  s.customProviders = s.customProviders || {};
+  s.customProviders[name] = { baseUrl: baseUrl.replace(/\/+$/, ''), apiKey };
+  await query('UPDATE users SET ai_settings = $1 WHERE id = $2', [JSON.stringify(s), req.user?.id]);
+  res.json({ success: true, name, baseUrl: s.customProviders[name].baseUrl });
+}));
+
+router.delete('/providers/:name', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const { name } = req.params;
+  const s = await getAISettings(req.user?.id!);
+  if (s.customProviders?.[name]) {
+    delete s.customProviders[name];
+    // Bersihkan juga referensi model yang memakai provider ini
+    if (s.defaultModel?.startsWith(`${name}:`)) s.defaultModel = null;
+    for (const k of Object.keys(s.features || {})) {
+      if (s.features![k]?.startsWith(`${name}:`)) delete s.features![k];
+    }
+    await query('UPDATE users SET ai_settings = $1 WHERE id = $2', [JSON.stringify(s), req.user?.id]);
+  }
+  res.json({ success: true });
+}));
+
+// Test provider: coba list models
+router.post('/providers/:name/test', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const { name } = req.params;
+  const s = await getAISettings(req.user?.id!);
+  const p = s.customProviders?.[name];
+  if (!p) return res.status(404).json({ error: 'Provider tidak ditemukan' });
+  try {
+    const client = clientFor(`${name}:x`, s);
+    const list = await client.models.list();
+    const models = (list.data || []).map(m => m.id).filter(Boolean);
+    res.json({ ok: true, count: models.length, sample: models.slice(0, 8) });
+  } catch (e: any) {
+    res.json({ ok: false, error: String(e?.message || e).slice(0, 200) });
+  }
+}));
 
 // Helper to compute today's Form/Readiness score
 async function getReadinessScore(userId: number) {
@@ -99,9 +241,29 @@ async function getReadinessScore(userId: number) {
   }
 }
 
-// Helper to get comprehensive user context for AI
+// Tanggal & hari ini (WIB) — model butuh ini agar tidak menebak dari aktivitas terakhir
+function nowJakarta(): string {
+  return new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  }).format(new Date()) + ' (WIB)';
+}
+
+// Identitas model — supaya model tidak mengaku-ngaku produk lain
+function modelIdentity(model: string): string {
+  const bare = model.includes(':') ? model.split(':').slice(1).join(':') : model;
+  const provider = model.includes(':') ? model.split(':')[0] : '9router';
+  const pretty = bare
+    .replace(/^[a-z]+\//, '')            // prefix vendor
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+  return `${pretty} (via ${provider})`;
+}
+
+// Helper: konteks kaya untuk semua fitur AI
 async function getFullUserContext(userId: number) {
-  const [summary, trend, activities, prs, readiness] = await Promise.all([
+  const [summary, trend, activities, prs, readiness, userRow, planRow] = await Promise.all([
     query(`
       SELECT 
         SUM(distance) as total_distance,
@@ -117,7 +279,8 @@ async function getFullUserContext(userId: number) {
       ORDER BY start_date DESC
     `, [userId]),
     query(`
-      SELECT id, name, distance, moving_time, average_speed, average_heartrate, elevation_gain, COALESCE(start_date_local, start_date::date::text) as start_date
+      SELECT id, name, distance, moving_time, average_speed, average_heartrate, elevation_gain, cadence, splits,
+             COALESCE(start_date_local, start_date::date::text) as start_date
       FROM activities 
       WHERE user_id = $1 
       ORDER BY start_date DESC 
@@ -129,14 +292,26 @@ async function getFullUserContext(userId: number) {
       WHERE user_id = $1
       ORDER BY distance ASC
     `, [userId]),
-    getReadinessScore(userId)
+    getReadinessScore(userId),
+    query('SELECT lab_config FROM users WHERE id = $1', [userId]),
+    query(`
+      SELECT id, workout_date, workout_type, details FROM coach_suggestions
+      WHERE user_id = $1 AND status = 'pending' AND workout_date >= CURRENT_DATE
+      ORDER BY workout_date LIMIT 1
+    `, [userId])
   ]);
 
+  const pendingPlan = planRow.rows[0] || null;
   return JSON.stringify({
+    current_date: nowJakarta(),
     last_7_days: summary.rows[0],
     past_1_week_trend: trend.rows,
     recent_activities: activities.rows,
     personal_records: prs.rows,
+    hr_zones_config: userRow.rows[0]?.lab_config || null,
+    pending_coach_plan: pendingPlan
+      ? { suggestion_id: pendingPlan.id, date: pendingPlan.workout_date, type: pendingPlan.workout_type, details: pendingPlan.details }
+      : null,
     readiness: {
       todays_form_score: readiness.form,
       status: readiness.status,
@@ -146,15 +321,52 @@ async function getFullUserContext(userId: number) {
 }
 
 // 1. Dashboard Analysis & Next Workout Suggestion
+// conditionDiagnosis/forwardOutlook: model baru kadang mengirim object — dinormalisasi ke string
+const dashboardSchema = z.object({
+  conditionDiagnosis: z.any(),
+  tomorrowRecommendation: z.record(z.string(), z.any()),
+  forwardOutlook: z.any()
+}).catchall(z.unknown());
+
+function coerceText(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (v && typeof v === 'object') {
+    return Object.values(v as Record<string, unknown>)
+      .filter(x => typeof x === 'string' || typeof x === 'number')
+      .join(' — ') || JSON.stringify(v);
+  }
+  return String(v ?? '');
+}
+
 router.post('/dashboard-analysis', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
-  const context = await getFullUserContext(req.user?.id!);
+  const userId = req.user?.id!;
+  const { model, settings } = featureModel('dashboard', await getAISettings(userId));
+  const context = await getFullUserContext(userId);
   const prompt = `Lakukan analisis mendalam berdasarkan data aktivitas lari saya minggu ini vs rencana.`;
-  
-  // Pass the specific system prompt. Gemini is configured to output JSON.
-  const responseText = await generateAIResponse(prompt, context, AI_COACH_SYSTEM_PROMPT);
-  const analysisJson = JSON.parse(responseText);
-  
-  res.json(analysisJson);
+
+  const analysis = await generateAIJson(prompt, context, AI_COACH_SYSTEM_PROMPT, model,
+    (d) => dashboardSchema.parse(d), settings);
+
+  // Simpan saran workout untuk feedback loop (saran pending lama ditandai superseded)
+  const rec = analysis.tomorrowRecommendation || {};
+  try {
+    await query(
+      `UPDATE coach_suggestions SET status = 'superseded' WHERE user_id = $1 AND status = 'pending'`,
+      [userId]
+    );
+    await query(
+      `INSERT INTO coach_suggestions (user_id, workout_date, workout_type, details, source)
+       VALUES ($1, CURRENT_DATE + 1, $2, $3, 'dashboard-analysis')`,
+      [userId, String(rec.sessionType || 'Run'), JSON.stringify(rec)]
+    );
+  } catch (e) { /* logging saran tidak boleh gagalkan analisis */ }
+
+  res.json({
+    ...analysis,
+    conditionDiagnosis: coerceText(analysis.conditionDiagnosis),
+    forwardOutlook: coerceText(analysis.forwardOutlook),
+    suggestion_saved: true
+  });
 }));
 
 // 2. Individual Activity Analysis
@@ -170,6 +382,7 @@ router.post('/activity-analysis/:id', authenticate, catchAsync(async (req: AuthR
   }
 
   const activity = activityResult.rows[0];
+  const { model, settings } = featureModel('activity', await getAISettings(req.user?.id!));
   const context = JSON.stringify(activity);
   const prompt = `
     Analisa lari saya yang berjudul "${activity.name}" pada tanggal ${format(new Date(activity.start_date), 'dd MMM yyyy')}.
@@ -177,22 +390,198 @@ router.post('/activity-analysis/:id', authenticate, catchAsync(async (req: AuthR
     Apa yang bagus dari lari ini dan apa yang bisa diperbaiki?
   `;
 
-  const response = await generateAIResponse(prompt, context, CHAT_SYSTEM_PROMPT, false);
-  res.json({ analysis: response });
+  const analysis = await generateAIText(prompt, context, CHAT_SYSTEM_PROMPT, model, settings);
+  res.json({ analysis });
 }));
 
-// 3. Manual AI Chat
+// 3. AI Chat — dengan memori percakapan + function calling ringan
+type ToolCall = { id: string; function: { name: string; arguments: string } };
+
+const AI_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'get_best_efforts',
+      description: 'Ambil semua personal records (best efforts) user: kategori, waktu, tanggal.',
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_activity_detail',
+      description: 'Ambil detail satu aktivitas lari (pace, HR, splits per km). Tanpa argumen = aktivitas terbaru.',
+      parameters: { type: 'object', properties: { activity_id: { type: 'number', description: 'ID aktivitas (opsional)' } } }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_cadence_trend',
+      description: 'Tren kadence mingguan user (rata-rata spm per minggu, 12 minggu terakhir).',
+      parameters: { type: 'object', properties: {} }
+    }
+  }
+] as any;
+
+async function executeTool(name: string, argsJson: string, userId: number): Promise<string> {
+  let args: any = {};
+  try { args = JSON.parse(argsJson || '{}'); } catch { /* ignore */ }
+  if (name === 'get_best_efforts') {
+    const r = await query(
+      'SELECT name, distance, elapsed_time, COALESCE(start_date_local, start_date::date::text) as date FROM best_efforts WHERE user_id = $1 ORDER BY distance',
+      [userId]);
+    return JSON.stringify(r.rows);
+  }
+  if (name === 'get_activity_detail') {
+    const r = args.activity_id
+      ? await query('SELECT name, distance, moving_time, average_speed, average_heartrate, cadence, splits, COALESCE(start_date_local, start_date::date::text) as date FROM activities WHERE id = $1 AND user_id = $2', [args.activity_id, userId])
+      : await query('SELECT name, distance, moving_time, average_speed, average_heartrate, cadence, splits, COALESCE(start_date_local, start_date::date::text) as date FROM activities WHERE user_id = $1 ORDER BY start_date DESC LIMIT 1', [userId]);
+    return JSON.stringify(r.rows[0] || { error: 'tidak ada aktivitas' });
+  }
+  if (name === 'get_cadence_trend') {
+    const r = await query(`
+      SELECT date_trunc('week', COALESCE(start_date_local::timestamp, start_date)) as week,
+             ROUND(AVG(cadence)::numeric, 1) as avg_cadence, COUNT(*) as runs
+      FROM activities WHERE user_id = $1 AND cadence IS NOT NULL
+        AND start_date >= NOW() - INTERVAL '12 weeks'
+      GROUP BY 1 ORDER BY 1`, [userId]);
+    return JSON.stringify(r.rows);
+  }
+  return JSON.stringify({ error: `tool tidak dikenal: ${name}` });
+}
+
 router.post('/chat', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
-  const { message } = req.body;
-  if (!message) return res.status(400).json({ error: 'Message is required' });
+  const userId = req.user?.id!;
+  const { message, stream } = req.body;
+  if (!message || typeof message !== 'string') return res.status(400).json({ error: 'Message is required' });
+  if (message.length > 4000) return res.status(400).json({ error: 'Pesan terlalu panjang' });
+  if (chatRateLimited(userId)) return res.status(429).json({ error: 'Terlalu banyak pesan. Tunggu sebentar.' });
 
-  const context = await getFullUserContext(req.user?.id!);
-  // For manual chat, use conversational prompt and request plain text (not JSON)
-  const response = await generateAIResponse(message, context, CHAT_SYSTEM_PROMPT, false);
-  res.json({ response });
+  const { model, settings } = featureModel('chat', await getAISettings(userId));
+  const context = await getFullUserContext(userId);
+
+  // Muat riwayat percakapan (16 pesan terakhir)
+  const history = await query(
+    'SELECT role, content FROM ai_chat_messages WHERE user_id = $1 ORDER BY id DESC LIMIT 16',
+    [userId]
+  );
+  const historyMsgs = history.rows.reverse().map((h: any) => ({ role: h.role, content: h.content }));
+
+  const messages: any[] = [
+    { role: 'system', content: CHAT_SYSTEM_PROMPT },
+    { role: 'user', content: `Hari ini: ${nowJakarta()}.\nKamu menjawab sebagai model: ${modelIdentity(model)}. Jika ditanya model/brand AI apa yang kamu pakai, jawab persis itu — jangan mengaku brand lain.\nContext data (stats kamu):\n${context}\n\nGunakan data ini untuk menjawab. Selalu pakai tanggal hari ini di atas sebagai acuan "hari ini", "kemarin", dan "besok".` },
+    ...historyMsgs,
+    { role: 'user', content: message }
+  ];
+
+  // ── Mode streaming (SSE): jawaban dikirim bertahap ──
+  if (stream) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+    const send = (event: string, data: unknown) =>
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+    try {
+      // Tahap 1: deteksi tool call (non-stream — tools dihitung dulu)
+      const first = await openaiWithTools(messages, model, settings);
+      if (first.toolCalls && first.toolCalls.length > 0) {
+        send('tool', { tools: first.toolCalls.map(t => t.function.name) });
+        messages.push({ role: 'assistant', content: first.content || null, tool_calls: first.raw.tool_calls });
+        for (const tc of first.toolCalls) {
+          const result = await executeTool(tc.function.name, tc.function.arguments, userId);
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
+        }
+      }
+      // Tahap 2: stream jawaban final
+      const reply = await generateAIChatStream(messages, model, (delta) => send('delta', { text: delta }), settings);
+      send('done', { model });
+      res.end();
+
+      await query('INSERT INTO ai_chat_messages (user_id, role, content, model) VALUES ($1, $2, $3, $4)',
+        [userId, 'user', message, model]);
+      await query('INSERT INTO ai_chat_messages (user_id, role, content, model) VALUES ($1, $2, $3, $4)',
+        [userId, 'assistant', reply, model]);
+    } catch (err: any) {
+      send('error', { message: err?.message || 'AI gagal merespons' });
+      res.end();
+    }
+    return;
+  }
+
+  // ── Mode biasa (non-stream) ──
+  let reply = '';
+  try {
+    // Coba dengan tools (function calling); kalau provider tidak dukung, plain call
+    const first = await openaiWithTools(messages, model, settings);
+    if (first.toolCalls && first.toolCalls.length > 0) {
+      messages.push({ role: 'assistant', content: first.content || null, tool_calls: first.raw.tool_calls });
+      for (const tc of first.toolCalls) {
+        const result = await executeTool(tc.function.name, tc.function.arguments, userId);
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
+      }
+      const second = await generateAIChat(messages, model, settings);
+      reply = second;
+    } else {
+      reply = first.content || '';
+    }
+  } catch (err) {
+    if (err instanceof AIResponseError) throw err;
+    throw err;
+  }
+
+  // Simpan percakapan
+  await query('INSERT INTO ai_chat_messages (user_id, role, content, model) VALUES ($1, $2, $3, $4)',
+    [userId, 'user', message, model]);
+  await query('INSERT INTO ai_chat_messages (user_id, role, content, model) VALUES ($1, $2, $3, $4)',
+    [userId, 'assistant', reply, model]);
+
+  res.json({ response: reply, model });
 }));
 
-// 4. Generate & Save Race Prediction
+async function openaiWithTools(messages: any[], model: string, settings = { } as any): Promise<{ content: string | null; toolCalls?: ToolCall[]; raw?: any }> {
+  const client = clientFor(model, settings);
+  try {
+    const response = await client.chat.completions.create({
+      model: bareModel(model),
+      messages,
+      tools: AI_TOOLS,
+    });
+    const msg = response.choices[0].message as any;
+    if (msg.tool_calls && msg.tool_calls.length > 0) {
+      return { content: msg.content, toolCalls: msg.tool_calls, raw: msg };
+    }
+    return { content: msg.content || '' };
+  } catch (err) {
+    // Provider tidak mendukung tools → panggilan biasa
+    const reply = await generateAIChat(messages, model, settings);
+    return { content: reply };
+  }
+}
+
+// 3b. Riwayat chat untuk frontend
+router.get('/chat/history', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const r = await query(
+    'SELECT role, content, model, created_at FROM ai_chat_messages WHERE user_id = $1 ORDER BY id DESC LIMIT 30',
+    [req.user?.id]
+  );
+  res.json(r.rows.reverse());
+}));
+
+router.delete('/chat/history', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  await query('DELETE FROM ai_chat_messages WHERE user_id = $1', [req.user?.id]);
+  res.json({ success: true });
+}));
+
+// 4. Generate & Save Race Prediction — hybrid: formula baseline + AI narasi
+const predictionSchema = z.object({
+  prediction: z.record(z.string(), z.any()),
+  readinessLevel: z.record(z.string(), z.any()).optional()
+}).catchall(z.unknown());
+
 router.post('/race-prediction/:id', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const raceResult = await query('SELECT * FROM races WHERE id = $1 AND user_id = $2', [id, req.user?.id]);
@@ -202,23 +591,42 @@ router.post('/race-prediction/:id', authenticate, catchAsync(async (req: AuthReq
   }
   
   const race = raceResult.rows[0];
+  const { model, settings } = featureModel('prediction', await getAISettings(req.user?.id!));
+
+  // Baseline formula (VO2max → Riegel) sebagai jangkar objektif
+  const acts = await query(
+    `SELECT start_date, moving_time, average_heartrate, distance, average_speed, splits
+     FROM activities WHERE user_id = $1 AND start_date >= NOW() - INTERVAL '60 days'
+     ORDER BY start_date DESC`, [req.user?.id]);
+  const lab = await query('SELECT lab_config FROM users WHERE id = $1', [req.user?.id]);
+  const vo2max = estimateVO2Max(acts.rows, lab.rows[0]?.lab_config?.maxHr);
+  const { predictRaceTimes } = await import('../services/analytics.js');
+  const baseline = predictRaceTimes(vo2max);
+
   const contextStr = await getFullUserContext(req.user?.id!);
-  const raceContext = `Target Race: ${race.race_name}\\nDistance: ${race.distance} km\\nTarget Time: ${race.target_time}\\n\\nPast Activity Data:\\n${contextStr}`;
+  const raceContext = `Target Race: ${race.race_name}\nDistance: ${race.distance} km\nTarget Time: ${race.target_time}\n\nBaseline prediksi dari formula VO2max (${vo2max?.toFixed?.(1) ?? vo2max}): ${JSON.stringify(baseline)}\nGunakan baseline ini sebagai jangkar — kalau analisis kamu berbeda jauh, jelaskan kenapa.\n\nPast Activity Data:\n${contextStr}`;
   
   const prompt = `Minta prediksi realistis untuk race saya berdasarkan data aktivitas ini.`;
-  const responseText = await generateAIResponse(prompt, raceContext, RACE_PREDICTION_SYSTEM_PROMPT);
-  const predictionJson = JSON.parse(responseText);
+  const prediction = await generateAIJson(prompt, raceContext, RACE_PREDICTION_SYSTEM_PROMPT, model,
+    (d) => predictionSchema.parse(d), settings);
 
   // Cache the prediction in DB
   await query(
     'UPDATE races SET prediction = $1 WHERE id = $2 AND user_id = $3',
-    [predictionJson, id, req.user?.id]
+    [prediction, id, req.user?.id]
   );
 
-  res.json(predictionJson);
+  res.json(prediction);
 }));
 
 // 5. Generate & Save Training Plan
+const planSchema = z.object({
+  summary: z.string().optional(),
+  phases: z.array(z.any()).min(1),
+  raceDay: z.any().optional(),
+  coachTips: z.any().optional()
+}).catchall(z.unknown());
+
 router.post('/training-plan/:id', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const raceResult = await query('SELECT * FROM races WHERE id = $1 AND user_id = $2', [id, req.user?.id]);
@@ -228,6 +636,7 @@ router.post('/training-plan/:id', authenticate, catchAsync(async (req: AuthReque
   }
   
   const race = raceResult.rows[0];
+  const { model, settings } = featureModel('plan', await getAISettings(req.user?.id!));
   const daysToRace = Math.ceil((new Date(race.race_date).getTime() - new Date().getTime()) / (1000 * 3600 * 24));
   
   const raceContext = `
@@ -240,16 +649,16 @@ router.post('/training-plan/:id', authenticate, catchAsync(async (req: AuthReque
   `;
   
   const prompt = `Tolong buatkan training plan terstruktur untuk race saya.`;
-  const responseText = await generateAIResponse(prompt, raceContext, TRAINING_PLAN_SYSTEM_PROMPT);
-  const trainingPlanJson = JSON.parse(responseText);
+  const trainingPlan = await generateAIJson(prompt, raceContext, TRAINING_PLAN_SYSTEM_PROMPT, model,
+    (d) => planSchema.parse(d), settings);
 
   // Cache the training plan in DB
   await query(
     'UPDATE races SET training_plan = $1 WHERE id = $2 AND user_id = $3',
-    [trainingPlanJson, id, req.user?.id]
+    [trainingPlan, id, req.user?.id]
   );
 
-  res.json(trainingPlanJson);
+  res.json(trainingPlan);
 }));
 
 // 6. Merge Multiple Training Plans
@@ -268,6 +677,7 @@ router.post('/merge-plans', authenticate, catchAsync(async (req: AuthRequest, re
     return res.status(404).json({ error: 'One or more races not found' });
   }
 
+  const { model, settings } = featureModel('merge', await getAISettings(req.user?.id!));
   const races = racesResult.rows;
   const plansWithContext = races.map(r => ({
     id: r.id,
@@ -285,12 +695,15 @@ router.post('/merge-plans', authenticate, catchAsync(async (req: AuthRequest, re
   });
 
   const prompt = `Gabungkan training plan untuk ${races.length} race ini menjadi satu master plan yang kohesif.`;
-  const responseText = await generateAIResponse(prompt, context, SMART_MERGE_SYSTEM_PROMPT);
-  const masterPlanJson = JSON.parse(responseText);
+  const masterPlan = await generateAIJson(prompt, context, SMART_MERGE_SYSTEM_PROMPT, model,
+    (d) => z.object({
+      ringkasanStrategi: z.any(),
+      masterPlan: z.array(z.any()).min(1)
+    }).catchall(z.unknown()).parse(d), settings);
 
   const persistenceData = {
     raceIds: raceIds,
-    plan: masterPlanJson,
+    plan: masterPlan,
     generatedAt: new Date().toISOString()
   };
 

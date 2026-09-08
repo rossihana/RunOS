@@ -8,6 +8,27 @@
       "when": 1774778956883,
       "tag": "0000_dazzling_colonel_america",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786118400000,
+      "tag": "0001_garmin_login",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786204800000,
+      "tag": "0002_ai_upgrade",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786291200000,
+      "tag": "0003_ai_settings",
+      "breakpoints": true
     }
   ]
 }

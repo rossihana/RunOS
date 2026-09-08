@@ -1,7 +1,7 @@
-import { Router, Response, Request } from 'express';
+import { Router, Request, Response } from 'express';
 import { query } from '../db.js';
 import jwt from 'jsonwebtoken';
-import axios from 'axios';
+import crypto from 'crypto';
 import { AuthRequest, authenticate } from '../middleware/auth.js';
 import { env } from '../config/env.js';
 import { catchAsync } from '../utils/catchAsync.js';
@@ -10,127 +10,91 @@ const router = Router();
 const JWT_SECRET = env.JWT_SECRET;
 const isProduction = env.NODE_ENV === 'production';
 
-const { STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET } = env;
+// ─── Password hashing: Node stdlib scrypt (salt stored with hash) ───
 
-router.get('/url', (req, res: Response) => {
-  const redirectUri = `${env.STRAVA_REDIRECT_URI}`; // Simplified by using actual redirect uri from env
+function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
 
-  if (!STRAVA_CLIENT_ID) {
-    return res.json({ url: `http://localhost:3000/api/auth/mock-callback` });
-  }
+function verifyPassword(password: string, stored: string): boolean {
+  const [salt, hash] = stored.split(':');
+  if (!salt || !hash) return false;
+  const candidate = crypto.scryptSync(password, salt, 64);
+  const expected = Buffer.from(hash, 'hex');
+  return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
+}
 
-  const params = new URLSearchParams({
-    client_id: STRAVA_CLIENT_ID,
-    redirect_uri: redirectUri,
-    response_type: 'code',
-    scope: 'read,activity:read_all',
-  });
+// ─── Shared: issue JWT + cookie ───
 
-  res.json({ url: `https://www.strava.com/oauth/authorize?${params.toString()}` });
-});
-
-router.get('/callback', catchAsync(async (req: Request, res: Response) => {
-  const { code } = req.query;
-
-  if (!code || typeof code !== 'string') {
-    return res.status(400).send('Missing code');
-  }
-
-  const tokenResponse = await axios.post('https://www.strava.com/oauth/token', {
-    client_id: STRAVA_CLIENT_ID,
-    client_secret: STRAVA_CLIENT_SECRET,
-    code,
-    grant_type: 'authorization_code',
-  });
-
-  const { access_token, refresh_token, expires_at, athlete } = tokenResponse.data;
-
-  // Upsert user
-  await query(`
-    INSERT INTO users (strava_athlete_id, access_token, refresh_token, token_expires_at, first_name, last_name, profile_picture, timezone)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    ON CONFLICT (strava_athlete_id) DO UPDATE SET
-      access_token = EXCLUDED.access_token,
-      refresh_token = EXCLUDED.refresh_token,
-      token_expires_at = EXCLUDED.token_expires_at,
-      first_name = EXCLUDED.first_name,
-      last_name = EXCLUDED.last_name,
-      profile_picture = EXCLUDED.profile_picture,
-      timezone = EXCLUDED.timezone
-  `, [athlete.id, access_token, refresh_token, expires_at, athlete.firstname, athlete.lastname, athlete.profile, athlete.timezone]);
-
-  const userResult = await query('SELECT id FROM users WHERE strava_athlete_id = $1', [athlete.id]);
-  const userRow = userResult.rows[0];
-
-  const token = jwt.sign({ id: userRow.id, strava_athlete_id: athlete.id }, JWT_SECRET, { expiresIn: '7d' });
-
+function issueSession(res: Response, userId: number, user: object): string {
+  const token = jwt.sign({ id: userId }, JWT_SECRET, { expiresIn: '7d' });
   res.cookie('token', token, {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
+  return token;
+}
 
-  res.send(`
-    <html>
-      <body>
-        <script>
-          if (window.opener) {
-            window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: '${token}' }, '*');
-            window.close();
-          } else {
-            window.location.href = '/';
-          }
-        </script>
-        <p>Authentication successful. This window should close automatically.</p>
-      </body>
-    </html>
-  `);
+// ─── Auth endpoints ───
+
+router.post('/register', catchAsync(async (req: Request, res: Response) => {
+  const { email, password, name } = req.body || {};
+  const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+
+  if (!cleanEmail || !/^\S+@\S+\.\S+$/.test(cleanEmail)) {
+    return res.status(400).json({ error: 'Email tidak valid' });
+  }
+  if (typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ error: 'Password minimal 8 karakter' });
+  }
+
+  const existing = await query('SELECT id FROM users WHERE email = $1', [cleanEmail]);
+  if (existing.rows.length > 0) {
+    return res.status(409).json({ error: 'Email sudah terdaftar' });
+  }
+
+  const passwordHash = hashPassword(password);
+  const [first = '', ...rest] = (typeof name === 'string' ? name.trim() : '').split(' ');
+  const result = await query(
+    `INSERT INTO users (email, password_hash, first_name, last_name)
+     VALUES ($1, $2, $3, $4) RETURNING id, email, first_name, last_name`,
+    [cleanEmail, passwordHash, first || null, rest.join(' ') || null]
+  );
+  const user = result.rows[0];
+
+  const token = issueSession(res, user.id, user);
+  res.status(201).json({ token, user });
 }));
 
-// Mock callback for dev without Strava credentials
-router.get('/mock-callback', catchAsync(async (req: Request, res: Response) => {
-  const mockAthleteId = 12345;
+router.post('/login', catchAsync(async (req: Request, res: Response) => {
+  const { email, password } = req.body || {};
+  const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
-  await query(`
-    INSERT INTO users (strava_athlete_id, first_name, last_name, profile_picture)
-    VALUES ($1, $2, $3, $4)
-    ON CONFLICT (strava_athlete_id) DO UPDATE SET
-      first_name = EXCLUDED.first_name
-  `, [mockAthleteId, 'Mock', 'Runner', 'https://picsum.photos/seed/runner/200/200']);
+  if (!cleanEmail || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Email dan password wajib diisi' });
+  }
 
-  const userResult = await query('SELECT id FROM users WHERE strava_athlete_id = $1', [mockAthleteId]);
-  const userRow = userResult.rows[0];
+  const result = await query(
+    'SELECT id, email, first_name, last_name, password_hash FROM users WHERE email = $1',
+    [cleanEmail]
+  );
+  const user = result.rows[0];
+  if (!user || !verifyPassword(password, user.password_hash)) {
+    return res.status(401).json({ error: 'Email atau password salah' });
+  }
 
-  const token = jwt.sign({ id: userRow.id, strava_athlete_id: mockAthleteId }, JWT_SECRET, { expiresIn: '7d' });
-
-  res.cookie('token', token, {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
-
-  res.send(`
-    <html>
-      <body>
-        <script>
-          if (window.opener) {
-            window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: '${token}' }, '*');
-            window.close();
-          } else {
-            window.location.href = '/';
-          }
-        </script>
-        <p>Mock Authentication successful. This window should close automatically.</p>
-      </body>
-    </html>
-  `);
+  const safeUser = { id: user.id, email: user.email, first_name: user.first_name, last_name: user.last_name };
+  const token = issueSession(res, user.id, safeUser);
+  res.json({ token, user: safeUser });
 }));
 
 router.get('/me', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
   const result = await query(
-    'SELECT id, strava_athlete_id, first_name, last_name, profile_picture FROM users WHERE id = $1',
+    'SELECT id, email, first_name, last_name, profile_picture FROM users WHERE id = $1',
     [req.user?.id]
   );
   if (result.rows.length === 0) {
@@ -139,7 +103,7 @@ router.get('/me', authenticate, catchAsync(async (req: AuthRequest, res: Respons
   res.json(result.rows[0]);
 }));
 
-router.post('/logout', (req, res: Response) => {
+router.post('/logout', (req: Request, res: Response) => {
   res.clearCookie('token');
   res.json({ success: true });
 });

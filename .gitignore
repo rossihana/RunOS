@@ -5,3 +5,8 @@ node_modules/
 .DS_Store
 *.log
 *.db
+__pycache__/
+scripts/garmin_sync.env
+scripts/.garmin_tokens
+backend/tmp/
+frontend/tsconfig.tsbuildinfo
