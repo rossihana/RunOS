@@ -8,6 +8,8 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(8),
   GEMINI_API_KEY: z.string().optional(),
   NINEROUTER_BASE_URL: z.string().url().default('http://localhost:20128/v1'),
+  // Kunci registrasi: kosong = registrasi DITUTUP. Isi untuk membuka (personal app).
+  INVITE_CODE: z.string().optional(),
 });
 
 const envParse = envSchema.safeParse(process.env);

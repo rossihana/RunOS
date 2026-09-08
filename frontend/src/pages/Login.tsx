@@ -7,6 +7,8 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
+  const [needInvite, setNeedInvite] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -18,12 +20,17 @@ export default function Login() {
       const response = await api.post(`/auth/${mode}`, {
         email,
         password,
-        ...(mode === 'register' ? { name } : {}),
+        ...(mode === 'register' ? { name, inviteCode: inviteCode || undefined } : {}),
       });
       localStorage.setItem('token', response.data.token);
       window.location.href = '/';
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Terjadi kesalahan. Coba lagi.');
+      const serverMsg = err.response?.data?.error || 'Terjadi kesalahan. Coba lagi.';
+      // Server menuntut kode undangan -> tampilkan field (sekali, lalu persist di mode register)
+      if (mode === 'register' && (serverMsg.includes('undangan') || err.response?.status === 403)) {
+        setNeedInvite(true);
+      }
+      setError(serverMsg);
       setLoading(false);
     }
   };
@@ -59,6 +66,21 @@ export default function Login() {
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Nama kamu"
                   className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                />
+              </div>
+            )}
+            {mode === 'register' && needInvite && (
+              <div>
+                <label htmlFor="inviteCode" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  Kode Undangan
+                </label>
+                <input
+                  id="inviteCode"
+                  type="text"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                  placeholder="Kode dari pemilik aplikasi"
+                  className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
                 />
               </div>
             )}
