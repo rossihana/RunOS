@@ -43,7 +43,8 @@ app.get('/api/health', async (req, res) => {
     await pool.query('SELECT 1');
     res.json({ status: 'ok', db: true });
   } catch (e: any) {
-    res.json({ status: 'ok', db: false, error: e.message });
+    // DB down = instance tidak siap melayani trafik → 503 (LB akan mengeluarkannya dari rotasi)
+    res.status(503).json({ status: 'degraded', db: false, error: e.message });
   }
 });
 

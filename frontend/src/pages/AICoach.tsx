@@ -4,6 +4,8 @@ import { Link } from 'react-router-dom';
 import api from '../services/api';
 import ReactMarkdown from 'react-markdown';
 
+const idemKey = () => crypto.randomUUID();
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
@@ -71,13 +73,14 @@ export default function AICoach() {
 
     try {
       const response = await fetch(`${api.defaults.baseURL}/ai/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({ message: userMessage, stream: true }),
-      });
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('token')}`,
+        'X-Idempotency-Key': idemKey(),
+      },
+      body: JSON.stringify({ message: userMessage, stream: true }),
+    });
 
       if (!response.ok || !response.body) {
         const err = await response.json().catch(() => null);

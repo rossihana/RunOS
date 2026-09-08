@@ -1,6 +1,8 @@
-import { Router, Response, Request } from 'express';
+import { Router, Request, Response } from 'express';
 import { query } from '../db.js';
 import { AuthRequest, authenticate } from '../middleware/auth.js';
+import { aiRateLimit } from '../middleware/rateLimit.js';
+import { aiIdempotency } from '../middleware/idempotency.js';
 import {
   generateAIJson,
   generateAIText,
@@ -26,16 +28,15 @@ import { catchAsync } from '../utils/catchAsync.js';
 
 const router = Router();
 
-// ─── Rate limit sederhana untuk chat (20 pesan/menit/user) ───
-const chatHits = new Map<number, number[]>();
-function chatRateLimited(userId: number): boolean {
-  const now = Date.now();
-  const hits = (chatHits.get(userId) || []).filter(t => now - t < 60_000);
-  if (hits.length >= 20) return true;
-  hits.push(now);
-  chatHits.set(userId, hits);
-  return false;
-}
+// ─── Rate limit persisten per endpoint AI (DB-based — akurat di balik LB) ───
+const RL = {
+  chat: aiRateLimit('chat', 20, 60),
+  dashboard: aiRateLimit('dashboard-analysis', 6, 60),
+  activity: aiRateLimit('activity-analysis', 10, 60),
+  prediction: aiRateLimit('race-prediction', 4, 60),
+  plan: aiRateLimit('training-plan', 4, 60),
+  merge: aiRateLimit('merge-plans', 2, 60),
+};
 
 // ─── Model & provider per user ───
 // defaultModel + per-feature override + custom provider (BYOK, OpenAI-compatible).
@@ -338,7 +339,7 @@ function coerceText(v: unknown): string {
   return String(v ?? '');
 }
 
-router.post('/dashboard-analysis', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+router.post('/dashboard-analysis', authenticate, RL.dashboard, aiIdempotency('dashboard-analysis'), catchAsync(async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id!;
   const { model, settings } = featureModel('dashboard', await getAISettings(userId));
   const context = await getFullUserContext(userId);
@@ -370,7 +371,7 @@ router.post('/dashboard-analysis', authenticate, catchAsync(async (req: AuthRequ
 }));
 
 // 2. Individual Activity Analysis
-router.post('/activity-analysis/:id', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+router.post('/activity-analysis/:id', authenticate, RL.activity, aiIdempotency('activity-analysis'), catchAsync(async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const activityResult = await query(
     'SELECT * FROM activities WHERE id = $1 AND user_id = $2',
@@ -451,12 +452,11 @@ async function executeTool(name: string, argsJson: string, userId: number): Prom
   return JSON.stringify({ error: `tool tidak dikenal: ${name}` });
 }
 
-router.post('/chat', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+router.post('/chat', authenticate, RL.chat, aiIdempotency('chat'), catchAsync(async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id!;
   const { message, stream } = req.body;
   if (!message || typeof message !== 'string') return res.status(400).json({ error: 'Message is required' });
   if (message.length > 4000) return res.status(400).json({ error: 'Pesan terlalu panjang' });
-  if (chatRateLimited(userId)) return res.status(429).json({ error: 'Terlalu banyak pesan. Tunggu sebentar.' });
 
   const { model, settings } = featureModel('chat', await getAISettings(userId));
   const context = await getFullUserContext(userId);
@@ -582,7 +582,7 @@ const predictionSchema = z.object({
   readinessLevel: z.record(z.string(), z.any()).optional()
 }).catchall(z.unknown());
 
-router.post('/race-prediction/:id', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+router.post('/race-prediction/:id', authenticate, RL.prediction, aiIdempotency('race-prediction'), catchAsync(async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const raceResult = await query('SELECT * FROM races WHERE id = $1 AND user_id = $2', [id, req.user?.id]);
   
@@ -627,7 +627,7 @@ const planSchema = z.object({
   coachTips: z.any().optional()
 }).catchall(z.unknown());
 
-router.post('/training-plan/:id', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+router.post('/training-plan/:id', authenticate, RL.plan, aiIdempotency('training-plan'), catchAsync(async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const raceResult = await query('SELECT * FROM races WHERE id = $1 AND user_id = $2', [id, req.user?.id]);
   
@@ -662,7 +662,7 @@ router.post('/training-plan/:id', authenticate, catchAsync(async (req: AuthReque
 }));
 
 // 6. Merge Multiple Training Plans
-router.post('/merge-plans', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+router.post('/merge-plans', authenticate, RL.merge, aiIdempotency('merge-plans'), catchAsync(async (req: AuthRequest, res: Response) => {
   const { raceIds } = req.body;
   if (!raceIds || !Array.isArray(raceIds) || raceIds.length < 2) {
     return res.status(400).json({ error: 'At least two race IDs are required to merge plans' });

@@ -8,6 +8,11 @@ import { env } from './config/env.js';
 export const pool = new Pool({
   connectionString: env.DATABASE_URL,
   ssl: env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  // Batasi koneksi per instance — cegah connection exhaustion Supabase saat
+  // scale-out (LB/serverless menambah instance). 5 × beberapa instance aman di pooler.
+  max: 5,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 10_000,
 });
 
 export const db = drizzle(pool, { schema });

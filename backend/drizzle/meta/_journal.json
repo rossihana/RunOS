@@ -29,6 +29,20 @@
       "when": 1786291200000,
       "tag": "0003_ai_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786377600000,
+      "tag": "0004_rate_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786464000000,
+      "tag": "0005_idempotency",
+      "breakpoints": true
     }
   ]
 }
