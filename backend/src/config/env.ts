@@ -10,6 +10,8 @@ const envSchema = z.object({
   NINEROUTER_BASE_URL: z.string().url().default('http://localhost:20128/v1'),
   // Kunci registrasi: kosong = registrasi DITUTUP. Isi untuk membuka (personal app).
   INVITE_CODE: z.string().optional(),
+  // Secret untuk trigger sync Garmin (header X-Sync-Secret). Kosong = endpoint sync mati.
+  SYNC_SECRET: z.string().optional(),
 });
 
 const envParse = envSchema.safeParse(process.env);

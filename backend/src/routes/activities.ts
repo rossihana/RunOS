@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { query } from '../db.js';
 import { AuthRequest, authenticate } from '../middleware/auth.js';
 import { catchAsync } from '../utils/catchAsync.js';
@@ -173,24 +173,12 @@ router.get('/:id', authenticate, validateRequest(activityIdSchema), catchAsync(a
 // Data masuk dari scripts/garmin_sync.py (Garmin Connect → tabel activities).
 // Endpoint ini cuma menandai row yang belum lengkap supaya UI tahu statusnya.
 
-router.post('/sync', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
-  const result = await query(
-    `SELECT
-       COUNT(*) FILTER (WHERE splits IS NULL) AS without_splits,
-       COUNT(*) FILTER (WHERE streams IS NULL) AS without_streams,
-       COUNT(*) AS total
-     FROM activities WHERE user_id = $1`,
-    [req.user?.id]
-  );
-  const s = result.rows[0];
-  res.json({
-    success: true,
-    source: 'garmin',
-    total: Number(s.total),
-    without_splits: Number(s.without_splits),
-    without_streams: Number(s.without_streams),
-    message: `Data tersinkron via Garmin (${s.total} aktivitas). Backfill detail: jalankan scripts/garmin_sync.py --details.`
-  });
+router.post('/sync', catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+  // Trigger sync Garmin asli (spawn scripts/garmin_sync.py via venv).
+  // AUTH: X-Sync-Secret cocok dengan SYNC_SECRET (cukup sendiri — tanpa JWT juga boleh,
+  // supaya cron/scheduler yang tak bisa memperbarui JWT tetap jalan).
+  const { syncHandler } = await import('../services/garminTrigger.js');
+  return syncHandler(req, res, next);
 }));
 
 router.get('/analytics/readiness', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {

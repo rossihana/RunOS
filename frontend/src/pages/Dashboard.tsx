@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Toaster, toast } from 'react-hot-toast';
 import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   Activity, 
@@ -97,13 +98,26 @@ export default function Dashboard() {
 
   const syncMutation = useMutation({
     mutationFn: async () => {
-      return api.post('/activities/sync');
+      // Sync memicu scripts/garmin_sync.py di backend (butuh sync secret)
+      let secret = localStorage.getItem('runos_sync_secret') || '';
+      if (!secret) {
+        secret = prompt('Masukkan Sync Secret (lihat backend/.env SYNC_SECRET):') || '';
+        if (!secret) throw new Error('Sync dibatalkan — secret dibutuhkan');
+        localStorage.setItem('runos_sync_secret', secret);
+      }
+      const res = await api.post('/activities/sync', {}, { headers: { 'X-Sync-Secret': secret } });
+      return res.data;
     },
-    onSuccess: () => {
-      // Invalidate all dashboard queries to trigger a refetch
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    onSuccess: (data: any) => {
+      toast.success(data?.message || 'Sync dimulai — data muncul dalam 1-2 menit');
+      // Refetch setelah delay beri waktu Python menyelesaikan sync
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['dashboard'] }), 90_000);
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['dashboard'] }), 180_000);
     },
-    onError: (err) => {
+    onError: (err: any) => {
+      const msg = err?.response?.data?.error || err?.message || 'Sync gagal';
+      toast.error(msg);
+      if (String(msg).includes('secret')) localStorage.removeItem('runos_sync_secret');
       console.error('Error syncing activities:', err);
     }
   });
