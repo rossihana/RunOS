@@ -252,7 +252,7 @@ function nowJakarta(): string {
 }
 
 // Identitas model — supaya model tidak mengaku-ngaku produk lain
-function modelIdentity(model: string): string {
+export function modelIdentity(model: string): string {
   const bare = model.includes(':') ? model.split(':').slice(1).join(':') : model;
   const provider = model.includes(':') ? model.split(':')[0] : '9router';
   const pretty = bare

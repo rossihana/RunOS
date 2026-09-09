@@ -7,6 +7,7 @@
     "build": "tsc",
     "start": "node dist/app.js",
     "lint": "tsc --noEmit",
+    "test": "npm run lint && tsx --test src/__tests__/*.test.ts && cd ../scripts && D:/tools/garmin-hermes/Scripts/python.exe test_garmin_sync.py",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"

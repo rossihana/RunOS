@@ -92,7 +92,7 @@ export class AIResponseError extends Error {
 
 // Ekstrak objek JSON seimbang dari teks yang mungkin punya sampah sebelum/sesudah
 // (fence markdown, catatan trailing dari upstream model, dll).
-function extractJson(text: string): string {
+export function extractJson(text: string): string {
   const start = text.indexOf('{');
   if (start === -1) return text;
   let depth = 0, inStr = false, esc = false;
