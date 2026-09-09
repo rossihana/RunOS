@@ -5,7 +5,10 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string().url(),
+  // JWT: JWT_SECRET = aktif (sign). JWT_SECRETS = daftar koma untuk rotasi bertahap
+  // (verify menerima semua; sign selalu pakai JWT_SECRET). Opsional.
   JWT_SECRET: z.string().min(8),
+  JWT_SECRETS: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
   NINEROUTER_BASE_URL: z.string().url().default('http://localhost:20128/v1'),
   // Kunci registrasi: kosong = registrasi DITUTUP. Isi untuk membuka (personal app).
@@ -22,4 +25,11 @@ if (!envParse.success) {
 }
 
 export const env = envParse.data;
+
+// Daftar secret JWT untuk verify: aktif + legacy selama masa rotasi
+export const JWT_SECRETS: string[] = [
+  env.JWT_SECRET,
+  ...(env.JWT_SECRETS ? env.JWT_SECRETS.split(',').map(s => s.trim()).filter(Boolean) : []),
+];
+
 export default env;

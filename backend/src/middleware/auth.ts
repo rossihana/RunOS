@@ -1,8 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { env } from '../config/env.js';
-
-const JWT_SECRET = env.JWT_SECRET;
+import { env, JWT_SECRETS } from '../config/env.js';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -22,11 +20,14 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: number };
-    req.user = decoded;
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Invalid token' });
+  // Rotasi: token valid jika cocok dengan secret aktif ATAU legacy (masa rotasi)
+  for (const secret of JWT_SECRETS) {
+    try {
+      req.user = jwt.verify(token, secret) as { id: number };
+      return next();
+    } catch {
+      // coba secret berikutnya
+    }
   }
+  return res.status(401).json({ error: 'Invalid token' });
 };
