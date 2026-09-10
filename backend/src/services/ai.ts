@@ -20,6 +20,17 @@ export const DEFAULT_MODEL = "gemini/gemini-3.8-flash";
 // menambah postamble (ditangani extractJson); 2.5-flash & gemma-4 rusak/503.
 export const FALLBACK_MODELS = ["gemini/gemini-3.8-flash", "gemini/gemini-3.7-flash"];
 
+// ─── Katalog model GRATIS untuk user tanpa provider sendiri (S2, 09-09) ───
+// Semua lewat 9router pemilik app; glm-5.3-flash DISENGJAJA dikecualikan
+// (eksklusif untuk pemilik). Probe 09-09: qwen3.8-flash cepat & solid (1.1s),
+// hy3 bisa return kosong tanpa max_tokens (wajib set max_tokens),
+// mimo-v2.5 lambat (7-21s) tapi berfungsi.
+export const FREE_MODELS = ["b-ai/qwen3.8-flash", "b-ai/hy3", "b-ai/mimo-v2.5"];
+export const FREE_DEFAULT_MODEL = "b-ai/qwen3.8-flash";
+/** Email pemilik app — bebas pakai semua model termasuk glm-5.3-flash. */
+export const OWNER_EMAILS: string[] = (env.OWNER_EMAILS || "")
+  .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+
 // ─── Pengaturan AI per user (per fitur + provider custom) ───
 
 export interface AISettings {
@@ -43,8 +54,21 @@ export function featureModel(feature: string, settings: AISettings): { model: st
 
 export async function getAISettings(userId: number): Promise<AISettings> {
   const r = await import('../db.js');
-  const res = await r.query('SELECT ai_settings FROM users WHERE id = $1', [userId]);
-  return res.rows[0]?.ai_settings || {};
+  const res = await r.query('SELECT email, ai_settings FROM users WHERE id = $1', [userId]);
+  const s: AISettings = res.rows[0]?.ai_settings || {};
+  // Sanitasi S2: setting lama (pra-enforcement) yang melanggar katalog free dibuang saat runtime
+  if (!OWNER_EMAILS.includes(String(res.rows[0]?.email || '').toLowerCase())) {
+    if (s.defaultModel && !FREE_MODELS.includes(s.defaultModel) && !s.customProviders?.[s.defaultModel.split(':')[0]]) {
+      s.defaultModel = null;
+    }
+    for (const k of Object.keys(s.features || {})) {
+      const m = s.features![k];
+      if (m && !FREE_MODELS.includes(m) && !s.customProviders?.[m.split(':')[0]]) {
+        delete s.features![k];
+      }
+    }
+  }
+  return s;
 }
 
 /** Klien untuk satu panggilan: provider custom user kalau model berformat "provider:model", else 9router. */

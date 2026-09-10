@@ -14,6 +14,9 @@ import {
   clientFor,
   bareModel,
   DEFAULT_MODEL,
+  FREE_MODELS,
+  FREE_DEFAULT_MODEL,
+  OWNER_EMAILS,
   AIResponseError,
   AI_COACH_SYSTEM_PROMPT,
   RACE_PREDICTION_SYSTEM_PROMPT,
@@ -46,6 +49,33 @@ const MODEL_RE = /^[a-zA-Z0-9._\-\/:]{1,150}$/;
 const PROVIDER_NAME_RE = /^[a-zA-Z0-9_-]{1,30}$/;
 const AI_FEATURES = ['chat', 'dashboard', 'activity', 'prediction', 'plan', 'merge'] as const;
 
+// ─── S2: user biasa hanya boleh model GRATIS + provider sendiri (BYOK).
+// Owner (OWNER_EMAILS) bebas pakai semua model di 9router (termasuk glm-5.3-flash).
+async function emailOf(userId: number): Promise<string> {
+  const r = await query('SELECT email FROM users WHERE id = $1', [userId]);
+  return String(r.rows[0]?.email || '').toLowerCase();
+}
+function isOwner(email: string): boolean {
+  return OWNER_EMAILS.includes(email);
+}
+function modelAllowed(email: string, model: string, hasCustomProvider: boolean): boolean {
+  if (isOwner(email)) return true;
+  if (model.includes(':')) return hasCustomProvider; // BYOK: provider harus milik user
+  return FREE_MODELS.includes(model);
+}
+async function assertModelsAllowed(userId: number, models: (string | null | undefined)[]): Promise<string | null> {
+  const email = await emailOf(userId);
+  if (isOwner(email)) return null;
+  const settings = await getAISettings(userId);
+  for (const m of models) {
+    if (!m) continue;
+    if (!modelAllowed(email, m, !!settings.customProviders?.[m.split(':')[0]])) {
+      return `Model "${m}" tidak tersedia untuk akunmu. Pilih model gratis (${FREE_MODELS.join(', ')}) atau tambahkan provider sendiri di Pengaturan AI.`;
+    }
+  }
+  return null;
+}
+
 router.get('/models', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
   const settings = await getAISettings(req.user?.id!);
   const catalog = await listAIModels();
@@ -61,9 +91,10 @@ router.get('/models', authenticate, catchAsync(async (req: AuthRequest, res: Res
     }
   }
   res.json({
-    models: catalog,
+    models: isOwner(await emailOf(req.user?.id!)) ? catalog : FREE_MODELS,
+    freeModels: FREE_MODELS,
     custom,
-    default: settings.defaultModel || DEFAULT_MODEL,
+    default: settings.defaultModel || (isOwner(await emailOf(req.user?.id!)) ? DEFAULT_MODEL : FREE_DEFAULT_MODEL),
     features: settings.features || {}
   });
 }));
@@ -80,6 +111,15 @@ router.get('/settings', authenticate, catchAsync(async (req: AuthRequest, res: R
 router.put('/settings', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
   const { defaultModel, features } = req.body || {};
   const s = await getAISettings(req.user?.id!);
+
+  // Kumpulkan semua model yang akan aktif untuk validasi S2
+  const pending: (string | null | undefined)[] = [];
+  if (defaultModel !== undefined) pending.push(defaultModel);
+  if (features !== undefined && typeof features === 'object' && features) {
+    pending.push(...Object.values(features as Record<string, unknown>).map(v => (typeof v === 'string' ? v : null)));
+  }
+  const denied = await assertModelsAllowed(req.user?.id!, pending);
+  if (denied) return res.status(403).json({ error: denied });
 
   if (defaultModel !== undefined) {
     if (defaultModel !== null && (typeof defaultModel !== 'string' || !MODEL_RE.test(defaultModel))) {
@@ -342,6 +382,8 @@ function coerceText(v: unknown): string {
 router.post('/dashboard-analysis', authenticate, RL.dashboard, aiIdempotency('dashboard-analysis'), catchAsync(async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id!;
   const { model, settings } = featureModel('dashboard', await getAISettings(userId));
+  const deniedModel = await assertModelsAllowed(userId, [model]);
+  if (deniedModel) return res.status(403).json({ error: deniedModel });
   const context = await getFullUserContext(userId);
   const prompt = `Lakukan analisis mendalam berdasarkan data aktivitas lari saya minggu ini vs rencana.`;
 
@@ -384,6 +426,8 @@ router.post('/activity-analysis/:id', authenticate, RL.activity, aiIdempotency('
 
   const activity = activityResult.rows[0];
   const { model, settings } = featureModel('activity', await getAISettings(req.user?.id!));
+  const deniedModel = await assertModelsAllowed(req.user?.id!, [model]);
+  if (deniedModel) return res.status(403).json({ error: deniedModel });
   const context = JSON.stringify(activity);
   const prompt = `
     Analisa lari saya yang berjudul "${activity.name}" pada tanggal ${format(new Date(activity.start_date), 'dd MMM yyyy')}.
@@ -459,6 +503,8 @@ router.post('/chat', authenticate, RL.chat, aiIdempotency('chat'), catchAsync(as
   if (message.length > 4000) return res.status(400).json({ error: 'Pesan terlalu panjang' });
 
   const { model, settings } = featureModel('chat', await getAISettings(userId));
+  const deniedModel = await assertModelsAllowed(userId, [model]);
+  if (deniedModel) return res.status(403).json({ error: deniedModel });
   const context = await getFullUserContext(userId);
 
   // Muat riwayat percakapan (16 pesan terakhir)
@@ -592,6 +638,8 @@ router.post('/race-prediction/:id', authenticate, RL.prediction, aiIdempotency('
   
   const race = raceResult.rows[0];
   const { model, settings } = featureModel('prediction', await getAISettings(req.user?.id!));
+  const deniedModel = await assertModelsAllowed(req.user?.id!, [model]);
+  if (deniedModel) return res.status(403).json({ error: deniedModel });
 
   // Baseline formula (VO2max → Riegel) sebagai jangkar objektif
   const acts = await query(
@@ -637,6 +685,8 @@ router.post('/training-plan/:id', authenticate, RL.plan, aiIdempotency('training
   
   const race = raceResult.rows[0];
   const { model, settings } = featureModel('plan', await getAISettings(req.user?.id!));
+  const deniedModel = await assertModelsAllowed(req.user?.id!, [model]);
+  if (deniedModel) return res.status(403).json({ error: deniedModel });
   const daysToRace = Math.ceil((new Date(race.race_date).getTime() - new Date().getTime()) / (1000 * 3600 * 24));
   
   const raceContext = `
@@ -678,6 +728,8 @@ router.post('/merge-plans', authenticate, RL.merge, aiIdempotency('merge-plans')
   }
 
   const { model, settings } = featureModel('merge', await getAISettings(req.user?.id!));
+  const deniedModel = await assertModelsAllowed(req.user?.id!, [model]);
+  if (deniedModel) return res.status(403).json({ error: deniedModel });
   const races = racesResult.rows;
   const plansWithContext = races.map(r => ({
     id: r.id,

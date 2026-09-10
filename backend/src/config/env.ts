@@ -13,6 +13,9 @@ const envSchema = z.object({
   NINEROUTER_BASE_URL: z.string().url().default('http://localhost:20128/v1'),
   // Kunci registrasi: kosong = registrasi DITUTUP. Isi untuk membuka (personal app).
   INVITE_CODE: z.string().optional(),
+  // Email pemilik (comma-separated): bebas memilih semua model di 9router (termasuk glm-5.3-flash).
+  // User lain: hanya katalog FREE_MODELS + provider sendiri (BYOK).
+  OWNER_EMAILS: z.string().optional(),
   // Secret untuk trigger sync Garmin (header X-Sync-Secret). Kosong = endpoint sync mati.
   SYNC_SECRET: z.string().optional(),
 });
