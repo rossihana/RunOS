@@ -42,15 +42,14 @@ function issueSession(res: Response, userId: number, user: object): string {
 // ─── Auth endpoints ───
 
 router.post('/register', catchAsync(async (req: Request, res: Response) => {
-  // Registrasi terkunci kecuali INVITE_CODE diset & cocok (S1 — cegah penyalahgunaan kuota AI)
-  if (!env.INVITE_CODE) {
-    return res.status(403).json({ error: 'Registrasi ditutup. Hubungi pemilik aplikasi.' });
-  }
+  // Registrasi terbuka kecuali INVITE_CODE diset — kalau diset, wajib cocok (S1)
   const { email, password, name, inviteCode } = req.body || {};
-  if (typeof inviteCode !== 'string' ||
-      inviteCode.length !== env.INVITE_CODE.length ||
-      !crypto.timingSafeEqual(Buffer.from(inviteCode), Buffer.from(env.INVITE_CODE))) {
-    return res.status(403).json({ error: 'Kode undangan salah' });
+  if (env.INVITE_CODE) {
+    if (typeof inviteCode !== 'string' ||
+        inviteCode.length !== env.INVITE_CODE.length ||
+        !crypto.timingSafeEqual(Buffer.from(inviteCode), Buffer.from(env.INVITE_CODE))) {
+      return res.status(403).json({ error: 'Kode undangan salah' });
+    }
   }
   const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
