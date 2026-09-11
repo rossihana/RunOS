@@ -2,6 +2,12 @@ import { useState, useRef, useEffect } from 'react';
 import { Activity, Loader2, Eye, EyeOff } from 'lucide-react';
 import api from '../services/api';
 
+// Ditambahkan ke index.html <head> oleh index.html transform (lihat vite config) —
+// fallback baca langsung agar field kode undangan hanya muncul kalau server memang menuntut.
+declare global {
+  interface Window { __RUNOS_INVITE_REQUIRED__?: boolean }
+}
+
 export default function Login() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
@@ -12,6 +18,14 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  // Invite field hanya muncul kalau server memang menuntut (endpoint publik /auth/config)
+  const [envInviteRequired, setEnvInviteRequired] = useState(false);
+
+  useEffect(() => {
+    api.get('/auth/config')
+      .then(r => setEnvInviteRequired(!!r.data.inviteRequired))
+      .catch(() => setEnvInviteRequired(false));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,6 +44,7 @@ export default function Login() {
       // Server menuntut kode undangan -> tampilkan field (sekali, lalu persist di mode register)
       if (mode === 'register' && (serverMsg.includes('undangan') || err.response?.status === 403)) {
         setNeedInvite(true);
+        setEnvInviteRequired(true);
       }
       setError(serverMsg);
       setLoading(false);
@@ -70,7 +85,7 @@ export default function Login() {
                 />
               </div>
             )}
-            {mode === 'register' && (
+            {mode === 'register' && envInviteRequired && (
               <div>
                 <label htmlFor="inviteCode" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
                   Kode Undangan
@@ -99,28 +114,30 @@ export default function Login() {
                 className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
               />
             </div>
-            <div className="relative">
+            <div>
               <label htmlFor="password" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
                 Password
               </label>
-              <input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                required
-                minLength={8}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={mode === 'register' ? 'Minimal 8 karakter' : '••••••••'}
-                className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-4 py-3 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(v => !v)}
-                aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
-              >
-                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-              </button>
+              <div className="relative mt-1.5">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  minLength={8}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={mode === 'register' ? 'Minimal 8 karakter' : '••••••••'}
+                  className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-4 py-3 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
+              </div>
             </div>
 
             {error && (

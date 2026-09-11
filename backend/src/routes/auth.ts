@@ -41,6 +41,11 @@ function issueSession(res: Response, userId: number, user: object): string {
 
 // ─── Auth endpoints ───
 
+// Publik: konfigurasi form login (apakah registrasi butuh kode undangan)
+router.get('/config', (req: Request, res: Response) => {
+  res.json({ inviteRequired: !!env.INVITE_CODE });
+});
+
 router.post('/register', catchAsync(async (req: Request, res: Response) => {
   // Registrasi terbuka kecuali INVITE_CODE diset — kalau diset, wajib cocok (S1)
   const { email, password, name, inviteCode } = req.body || {};
