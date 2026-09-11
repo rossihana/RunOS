@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Activity, LayoutDashboard, Flag, LogOut, Menu, Sparkles, ClipboardList, FlaskConical, Cpu } from 'lucide-react';
+import { Activity, LayoutDashboard, Flag, LogOut, Menu, Sparkles, ClipboardList, FlaskConical, Cpu, Watch } from 'lucide-react';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import api from '../../services/api';
@@ -34,6 +34,7 @@ export default function Layout() {
     { path: '/training', label: 'Training', icon: ClipboardList },
     { path: '/races', label: 'Races', icon: Flag },
     { path: '/ai-coach', label: 'AI Coach', icon: Sparkles },
+    { path: '/garmin', label: 'Garmin Sync', icon: Watch },
     { path: '/ai-settings', label: 'AI Settings', icon: Cpu, desktopOnly: true },
     { path: '/lab', label: 'Perf. Lab', icon: FlaskConical },
   ];

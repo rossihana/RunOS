@@ -14,6 +14,7 @@ import ActivityDetail from './pages/ActivityDetail';
 import Races from './pages/Races';
 import AICoach from './pages/AICoach.tsx';
 import AiSettings from './pages/AiSettings.tsx';
+import GarminSettings from './pages/GarminSettings.tsx';
 import TrainingPlan from './pages/TrainingPlan.tsx';
 import PerformanceLab from './pages/PerformanceLab';
 import { ThemeProvider } from '@/components/layout/ThemeProvider';
@@ -34,6 +35,7 @@ export default function App() {
               <Route path="training" element={<TrainingPlan />} />
               <Route path="ai-coach" element={<AICoach />} />
               <Route path="ai-settings" element={<AiSettings />} />
+              <Route path="garmin" element={<GarminSettings />} />
               <Route path="lab" element={<PerformanceLab />} />
             </Route>
           </Route>
