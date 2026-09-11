@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { env } from '../config/env.js';
+import { decrypt } from './crypto.js';
 
 const openai = new OpenAI({
   apiKey: env.GEMINI_API_KEY || 'no-key',
@@ -76,7 +77,9 @@ export function clientFor(model: string, settings: AISettings): OpenAI {
   const m = /^([a-zA-Z0-9_-]+):(.+)$/.exec(model);
   if (m && settings.customProviders?.[m[1]]) {
     const p = settings.customProviders[m[1]];
-    return new OpenAI({ apiKey: p.apiKey, baseURL: p.baseUrl, timeout: 60_000, maxRetries: 0 });
+    // S3: apiKey tersimpan terenkripsi (v1:...) — decrypt di sini; plaintext lama tetap didukung (migrasi)
+    const apiKey = p.apiKey.startsWith('v1:') ? decrypt(p.apiKey) : p.apiKey;
+    return new OpenAI({ apiKey, baseURL: p.baseUrl, timeout: 60_000, maxRetries: 0 });
   }
   return openai;
 }

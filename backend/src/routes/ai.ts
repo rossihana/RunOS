@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db.js';
+import { encrypt, decrypt } from '../services/crypto.js';
 import { AuthRequest, authenticate } from '../middleware/auth.js';
 import { aiRateLimit } from '../middleware/rateLimit.js';
 import { aiIdempotency } from '../middleware/idempotency.js';
@@ -161,7 +162,8 @@ router.put('/providers', authenticate, catchAsync(async (req: AuthRequest, res: 
   }
   const s = await getAISettings(req.user?.id!);
   s.customProviders = s.customProviders || {};
-  s.customProviders[name] = { baseUrl: baseUrl.replace(/\/+$/, ''), apiKey };
+  // S3: API key disimpan TERENKRIPSI (AES-256-GCM) — tidak pernah plaintext di DB
+  s.customProviders[name] = { baseUrl: baseUrl.replace(/\/+$/, ''), apiKey: encrypt(apiKey) };
   await query('UPDATE users SET ai_settings = $1 WHERE id = $2', [JSON.stringify(s), req.user?.id]);
   res.json({ success: true, name, baseUrl: s.customProviders[name].baseUrl });
 }));

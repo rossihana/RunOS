@@ -16,6 +16,9 @@ const envSchema = z.object({
   // Email pemilik (comma-separated): bebas memilih semua model di 9router (termasuk glm-5.3-flash).
   // User lain: hanya katalog FREE_MODELS + provider sendiri (BYOK).
   OWNER_EMAILS: z.string().optional(),
+  // Kunci enkripsi AES-256-GCM untuk data sensitif di DB (API key provider, kredensial Garmin).
+  // Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  ENCRYPTION_KEY: z.string().regex(/^[0-9a-f]{64}$/i, 'ENCRYPTION_KEY harus 64 hex'),
   // Secret untuk trigger sync Garmin (header X-Sync-Secret). Kosong = endpoint sync mati.
   SYNC_SECRET: z.string().optional(),
 });
