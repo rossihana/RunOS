@@ -5,26 +5,14 @@ import crypto from 'crypto';
 import { AuthRequest, authenticate } from '../middleware/auth.js';
 import { env } from '../config/env.js';
 import { catchAsync } from '../utils/catchAsync.js';
+import { hashPassword, verifyPassword } from '../services/password.js';
+import { createResetToken, resetPassword } from '../services/passwordReset.js';
 
 const router = Router();
 const JWT_SECRET = env.JWT_SECRET;
 const isProduction = env.NODE_ENV === 'production';
 
-// ─── Password hashing: Node stdlib scrypt (salt stored with hash) ───
-
-function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
-  return `${salt}:${hash}`;
-}
-
-function verifyPassword(password: string, stored: string): boolean {
-  const [salt, hash] = stored.split(':');
-  if (!salt || !hash) return false;
-  const candidate = crypto.scryptSync(password, salt, 64);
-  const expected = Buffer.from(hash, 'hex');
-  return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
-}
+// ─── Password hashing dipindah ke services/password.js (dipakai juga reset password) ───
 
 // ─── Shared: issue JWT + cookie ───
 
@@ -120,5 +108,24 @@ router.post('/logout', (req: Request, res: Response) => {
   res.clearCookie('token');
   res.json({ success: true });
 });
+
+// ─── Reset password (personal deployment: token dikembalikan ke pemilik app) ───
+
+router.post('/forgot-password', catchAsync(async (req: Request, res: Response) => {
+  const { email } = req.body || {};
+  if (typeof email !== 'string') return res.status(400).json({ error: 'Email wajib diisi' });
+  const result = await createResetToken(email);
+  if ('error' in result) return res.status(404).json({ error: result.error });
+  // Personal deployment: token langsung dikembalikan (pemilik = admin). JANGAN dipakai
+  // multi-tenant publik tanpa mengganti ini dengan pengiriman email.
+  res.json({ resetToken: result.token, expiresIn: '1 hour' });
+}));
+
+router.post('/reset-password', catchAsync(async (req: Request, res: Response) => {
+  const { token, password } = req.body || {};
+  const result = await resetPassword(token, password);
+  if ('error' in result) return res.status(400).json({ error: result.error });
+  res.json({ success: true, message: 'Password berhasil direset. Silakan login.' });
+}));
 
 export default router;

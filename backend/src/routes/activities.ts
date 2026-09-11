@@ -169,14 +169,34 @@ router.get('/:id', authenticate, validateRequest(activityIdSchema), catchAsync(a
   });
 }));
 
-// ─── Best-effort sync endpoint ───
-// Data masuk dari scripts/garmin_sync.py (Garmin Connect → tabel activities).
-// Endpoint ini cuma menandai row yang belum lengkap supaya UI tahu statusnya.
+// ─── S7: Garmin per user ───
+// Endpoint lama /sync (SYNC_SECRET) tetap dipertahankan untuk cron owner.
+// Endpoint baru berbasis JWT: /garmin/connect, /garmin/sync, /garmin/status.
+
+router.post('/garmin/connect', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const m = await import('../services/garminPerUser.js');
+  return m.connectHandler(req, res);
+}));
+
+router.post('/garmin/sync', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const m = await import('../services/garminPerUser.js');
+  const userId = req.user?.id!;
+  if (!(await m.garminConnected(userId))) {
+    return res.status(400).json({ error: 'Hubungkan Garmin dulu di Pengaturan.' });
+  }
+  const { days, details } = req.body || {};
+  m.queueSync(userId, days ? Number(days) : undefined, Boolean(details));
+  res.json({ success: true, message: 'Sync Garmin dimulai di background (antrean).' });
+}));
+
+router.get('/garmin/status', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const m = await import('../services/garminPerUser.js');
+  return m.statusHandler(req, res);
+}));
+
+// ─── Legacy owner sync (SYNC_SECRET) — dipakai cron harian owner ───
 
 router.post('/sync', catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-  // Trigger sync Garmin asli (spawn scripts/garmin_sync.py via venv).
-  // AUTH: X-Sync-Secret cocok dengan SYNC_SECRET (cukup sendiri — tanpa JWT juga boleh,
-  // supaya cron/scheduler yang tak bisa memperbarui JWT tetap jalan).
   const { syncHandler } = await import('../services/garminTrigger.js');
   return syncHandler(req, res, next);
 }));

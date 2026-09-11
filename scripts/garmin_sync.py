@@ -17,7 +17,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TOKENSTORE = os.path.join(HERE, ".garmin_tokens")  # sesi login dipakai ulang (hindari rate-limit SSO)
+TOKENSTORE = os.environ.get("GARMIN_TOKENSTORE_DIR") or os.path.join(HERE, ".garmin_tokens")  # per-user (S7) atau owner default
 
 # Kategori best effort (nama = yang dipakai Dashboard & AI coach)
 BE_CATEGORIES = [
@@ -38,6 +38,12 @@ def read_env(path):
     return env
 
 ENV = read_env(os.path.join(HERE, "garmin_sync.env"))
+# S7: kredensial & tokenstore per user bisa disuntik via environment (backend spawn)
+if os.environ.get("GARMIN_EMAIL"):
+    ENV["GARMIN_EMAIL"] = os.environ["GARMIN_EMAIL"]
+if os.environ.get("GARMIN_PASSWORD"):
+    ENV["GARMIN_PASSWORD"] = os.environ["GARMIN_PASSWORD"]
+# owner tokenstore tetap default; per-user tokenstore via GARMIN_TOKENSTORE_DIR
 
 def need(key):
     val = ENV.get(key) or os.environ.get(key)
