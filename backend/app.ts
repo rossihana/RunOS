@@ -29,7 +29,13 @@ app.use(cookieParser());
 // can still respond (e.g. with a 503) rather than crashing entirely.
 let dbReady = false;
 initDb()
-  .then(() => { dbReady = true; })
+  .then(() => {
+    dbReady = true;
+    // S5 retensi: bersihkan chat > 30 hari saat boot (best-effort)
+    import('./src/services/retention.js')
+      .then(m => m.purgeOldChats(30))
+      .catch((e) => console.error('[retention]', e.message));
+  })
   .catch((err) => { console.error('initDb failed:', err); });
 
 app.use('/api/auth', authRoutes);
