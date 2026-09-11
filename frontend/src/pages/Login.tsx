@@ -70,7 +70,7 @@ export default function Login() {
                 />
               </div>
             )}
-            {mode === 'register' && needInvite && (
+            {mode === 'register' && (
               <div>
                 <label htmlFor="inviteCode" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
                   Kode Undangan
