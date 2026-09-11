@@ -117,6 +117,13 @@ export function syncStatusFor(userId: number): SyncJob | null {
   return lastByUser.get(userId) || null;
 }
 
+/** Cron: antrekan sync untuk SEMUA user yang terhubung (jalankan via /activities/cron-sync-all + SYNC_SECRET). */
+export async function queueAllConnected(days?: number, details = false): Promise<number> {
+  const r = await query('SELECT id FROM users WHERE garmin_email IS NOT NULL');
+  for (const row of r.rows) queueSync(row.id, days, details);
+  return r.rows.length;
+}
+
 /** Handler: simpan kredensial Garmin user (JWT auth). */
 export async function connectHandler(req: Request, res: Response) {
   const userId = (req as any).user?.id;

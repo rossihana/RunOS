@@ -195,10 +195,17 @@ router.get('/garmin/status', authenticate, catchAsync(async (req: AuthRequest, r
 }));
 
 // ─── Legacy owner sync (SYNC_SECRET) — dipakai cron harian owner ───
+// Sekarang cron memicu sync SEMUA user terhubung (S7), bukan hanya owner.
 
 router.post('/sync', catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-  const { syncHandler } = await import('../services/garminTrigger.js');
-  return syncHandler(req, res, next);
+  const { syncAuthorized } = await import('../services/garminTrigger.js');
+  if (!syncAuthorized(req)) {
+    return res.status(403).json({ error: 'Sync secret tidak valid / tidak diset' });
+  }
+  const { days, details } = req.body || {};
+  const m = await import('../services/garminPerUser.js');
+  const queued = await m.queueAllConnected(days ? Number(days) : undefined, Boolean(details));
+  res.json({ success: true, message: `Sync dimulai untuk ${queued} user terhubung (antrean).` });
 }));
 
 router.get('/analytics/readiness', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {

@@ -18,6 +18,11 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotStep, setForgotStep] = useState<'email' | 'reset'>('email');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotToken, setForgotToken] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   // Invite field hanya muncul kalau server memang menuntut (endpoint publik /auth/config)
   const [envInviteRequired, setEnvInviteRequired] = useState(false);
 
@@ -51,6 +56,29 @@ export default function Login() {
     }
   };
 
+  const handleForgot = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      if (forgotStep === 'email') {
+        const r = await api.post('/auth/forgot-password', { email: forgotEmail });
+        setForgotToken(r.data.resetToken);
+        setForgotStep('reset');
+        setError('');
+      } else {
+        await api.post('/auth/reset-password', { token: forgotToken, password: newPassword });
+        alert('Password berhasil direset! Silakan login dengan password baru.');
+        setShowForgot(false);
+        setForgotStep('email');
+        setForgotEmail(''); setForgotToken(''); setNewPassword('');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Gagal memproses reset password');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8 transition-colors">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
@@ -69,6 +97,53 @@ export default function Login() {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white dark:bg-zinc-900 py-8 px-4 shadow-sm sm:rounded-2xl sm:px-10 border border-zinc-200 dark:border-zinc-800 transition-colors">
+          {showForgot ? (
+            <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); handleForgot(); }}>
+              <h3 className="text-lg font-bold text-zinc-900 dark:text-white text-center">Reset Password</h3>
+              {forgotStep === 'email' ? (
+                <>
+                  <p className="text-xs text-zinc-500 text-center">Masukkan email akunmu. Token reset akan diberikan oleh admin aplikasi (personal deployment).</p>
+                  <input
+                    type="email"
+                    required
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    placeholder="Email akun RunOS"
+                    className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                  />
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-zinc-500 text-center">Token didapat ✅ (tersalin otomatis). Sekarang buat password baru.</p>
+                  <input
+                    type="text"
+                    value={forgotToken}
+                    onChange={(e) => setForgotToken(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-4 py-3 text-xs"
+                    readOnly
+                  />
+                  <input
+                    type="password"
+                    required
+                    minLength={8}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Password baru (min. 8 karakter)"
+                    className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                  />
+                </>
+              )}
+              {error && (
+                <div className="rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-4 py-3 text-sm text-red-600 dark:text-red-400">{error}</div>
+              )}
+              <button type="submit" disabled={loading} className="w-full rounded-xl bg-zinc-900 dark:bg-white dark:text-zinc-900 px-4 py-3 text-sm font-semibold text-white transition-colors disabled:opacity-50">
+                {loading ? 'Memproses...' : forgotStep === 'email' ? 'Minta Token Reset' : 'Simpan Password Baru'}
+              </button>
+              <button type="button" onClick={() => { setShowForgot(false); setError(''); }} className="w-full text-center text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+                Kembali ke login
+              </button>
+            </form>
+          ) : (
           <form className="space-y-5" onSubmit={handleSubmit}>
             {mode === 'register' && (
               <div>
@@ -171,7 +246,14 @@ export default function Login() {
                 </>
               )}
             </div>
+
+            {mode === 'login' && (
+              <button type="button" onClick={() => { setShowForgot(true); setError(''); }} className="w-full text-center text-xs text-zinc-500 hover:text-orange-500 transition-colors">
+                Lupa password?
+              </button>
+            )}
           </form>
+          )}
 
           <div className="mt-6 relative">
             <div className="absolute inset-0 flex items-center">

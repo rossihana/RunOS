@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Cpu, X, Plus, ArrowLeft } from 'lucide-react';
+import { Cpu, X, Plus, ArrowLeft, Watch, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 
@@ -25,16 +25,26 @@ export default function AiSettings() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
+  // S7: Garmin connection state
+  const [garmin, setGarmin] = useState<{ connected: boolean; email?: string } | null>(null);
+  const [gEmail, setGEmail] = useState('');
+  const [gPass, setGPass] = useState('');
+  const [gBusy, setGBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const [m, s] = await Promise.all([api.get('/ai/models'), api.get('/ai/settings')]);
+        const [m, s, g] = await Promise.all([
+          api.get('/ai/models'),
+          api.get('/ai/settings'),
+          api.get('/activities/garmin/status'),
+        ]);
         setModels(m.data.models || []);
         setCustomModels(m.data.custom || []);
         setDefaultModel(s.data.defaultModel || '');
         setFeatures(s.data.features || {});
         setProviders(s.data.providers || []);
+        setGarmin({ connected: !!g.data.connected });
       } catch (e) {
         console.error(e);
         setMsg('⚠️ Gagal memuat pengaturan');
@@ -155,6 +165,43 @@ export default function AiSettings() {
                 </div>
               ))}
             </div>
+          </section>
+
+          {/* Garmin Connection (S7) */}
+          <section>
+            <h3 className="text-sm font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2">
+              <Watch className="w-4 h-4 text-orange-500" /> Garmin Connection
+            </h3>
+            <p className="text-xs text-zinc-400 mb-3">
+              Hubungkan akun Garmin-mu agar data lari tersinkron otomatis ke RunOS. Password Garmin disimpan terenkripsi dan tidak pernah dikirim balik.
+            </p>
+            {garmin?.connected && (
+              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-2.5 mb-3">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">Terhubung — sync otomatis harian aktif</span>
+              </div>
+            )}
+            {!garmin?.connected && (
+              <div className="grid grid-cols-[2fr_2fr_auto] gap-2 mb-2">
+                <input value={gEmail} onChange={e => setGEmail(e.target.value)} placeholder="Email Garmin" className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-3 py-2 text-xs" />
+                <input value={gPass} onChange={e => setGPass(e.target.value)} placeholder="Password Garmin" type="password" className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-3 py-2 text-xs" />
+                <button
+                  onClick={async () => {
+                    setGBusy(true); setMsg('');
+                    try {
+                      await api.post('/activities/garmin/connect', { email: gEmail, password: gPass });
+                      setGarmin({ connected: true });
+                      setGEmail(''); setGPass('');
+                      setMsg('✅ Garmin terhubung');
+                    } catch (e: any) {
+                      setMsg(`⚠️ ${e?.response?.data?.error || 'Gagal menghubungkan'}`);
+                    } finally { setGBusy(false); }
+                  }}
+                  disabled={gBusy || !gEmail || !gPass}
+                  className="px-3 py-2 rounded-xl bg-orange-600 text-white text-xs font-bold hover:bg-orange-700 disabled:opacity-40"
+                >{gBusy ? '...' : 'Hubungkan'}</button>
+              </div>
+            )}
           </section>
 
           {/* Providers */}

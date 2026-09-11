@@ -98,7 +98,15 @@ export default function Dashboard() {
 
   const syncMutation = useMutation({
     mutationFn: async () => {
-      // Sync memicu scripts/garmin_sync.py di backend (butuh sync secret)
+      // S7: kalau Garmin sudah terhubung di akun → jalur per-user (JWT, tanpa secret)
+      try {
+        const st = await api.get('/activities/garmin/status');
+        if (st.data?.connected) {
+          const res = await api.post('/activities/garmin/sync', { days: 14, details: true });
+          return res.data;
+        }
+      } catch { /* fallback ke jalur owner */ }
+      // Jalur owner (SYNC_SECRET) — untuk akun pemilik & cron
       let secret = localStorage.getItem('runos_sync_secret') || '';
       if (!secret) {
         secret = prompt('Masukkan Sync Secret (lihat backend/.env SYNC_SECRET):') || '';
