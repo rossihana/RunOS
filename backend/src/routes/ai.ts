@@ -221,7 +221,7 @@ async function getReadinessScore(userId: number) {
     };
 
     const result = await query(
-      `SELECT COALESCE(start_date_local, start_date::date::text) as start_date, moving_time, average_heartrate, distance
+      `SELECT COALESCE(start_date_local, start_date::date::text) as start_date, moving_time, average_heartrate, distance, average_speed
        FROM activities 
        WHERE user_id = $1
        ORDER BY start_date ASC`,
@@ -244,8 +244,13 @@ async function getReadinessScore(userId: number) {
         const intensity = act.average_heartrate / 190;
         load = minutes * intensity * 1.5;
       } else {
+        // S4: tanpa HR → estimasi intensitas dari pace aktual (bukan flat km*6):
+        // pace 5:00/km ≈ intensitas 1.0; makin lambat makin ringan.
         const km = act.distance / 1000;
-        load = km * 6;
+        const speed = act.average_speed || (km > 0 ? act.distance / act.moving_time : 0);
+        const secPerKm = speed > 0 ? 1000 / speed : 360; // default 6:00/km
+        const intensity = Math.min(Math.max(300 / secPerKm, 0.5), 1.3);
+        load = minutes * intensity;
       }
       dailyLoad.set(day, (dailyLoad.get(day) || 0) + load);
     });

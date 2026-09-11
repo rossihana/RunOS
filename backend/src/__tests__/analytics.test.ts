@@ -64,7 +64,25 @@ test('calculateReadiness: banyak latihan → form turun', () => {
   assert.ok((fresh.form ?? 0) > (tired.form ?? 0), 'form setelah latihan berat harus lebih rendah');
 });
 
-// ── featureModel: strict vs fallback (regresi bug "deepseek jadi gemini") ──
+// ── S4: fallback load tanpa HR memakai pace aktual ──
+import { calculateReadiness as cr } from '../services/analytics.js';
+
+test('S4: run lambat tanpa HR memberi load lebih kecil dari run cepat tanpa HR', () => {
+  const now = Date.now();
+  const mk = (daysAgo: number, dist: number, time: number) => ({
+    start_date: new Date(now - daysAgo * 86400_000).toISOString(),
+    distance: dist,
+    moving_time: time,
+    average_heartrate: null,
+    average_speed: dist / time,
+  });
+  // 10 km jalan santai 90 menit (6:45/km) vs 10 km cepat 50 menit (5:00/km)
+  const slow = cr([mk(40, 60_000, 5400)] as any);
+  const fast = cr([mk(40, 10_000, 3000)] as any);
+  // load harian fast harus lebih besar → form turun lebih dalam
+  assert.ok((fast.form ?? 0) < (slow.form ?? 0), `fast=${fast.form} harus < slow=${slow.form}`);
+});
+
 test('featureModel: user pilih eksplisit → strict (allowFallback false)', () => {
   const r = featureModel('chat', { features: { chat: 'ds/deepseek-v4' } });
   assert.strictEqual(r.model, 'ds/deepseek-v4');

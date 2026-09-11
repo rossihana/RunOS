@@ -169,8 +169,12 @@ export function calculateReadiness(allActivities: ActivityData[]) {
       const intensity = act.average_heartrate / 190;
       load = minutes * intensity * 1.5;
     } else {
+      // S4: tanpa HR → estimasi intensitas dari pace aktual (bukan flat km*6)
       const km = act.distance / 1000;
-      load = km * 6;
+      const speed = act.average_speed || (km > 0 ? act.distance / act.moving_time : 0);
+      const secPerKm = speed > 0 ? 1000 / speed : 360;
+      const intensity = Math.min(Math.max(300 / secPerKm, 0.5), 1.3);
+      load = minutes * intensity;
     }
     
     dailyLoad.set(day, (dailyLoad.get(day) || 0) + load);
