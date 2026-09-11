@@ -355,8 +355,10 @@ def get_db():
     )
     return conn
 
-def get_user_id(conn):
-    """Pilih user pemilik data: yang punya aktivitas terbanyak (fallback: user pertama)."""
+def get_user_id(conn, explicit=None):
+    """Pilih user pemilik data: --user-id eksplisit, atau yang punya aktivitas terbanyak (fallback: user pertama)."""
+    if explicit is not None:
+        return explicit
     cur = conn.cursor()
     cur.execute("""SELECT u.id FROM users u
                    LEFT JOIN activities a ON a.user_id = u.id
@@ -374,10 +376,11 @@ def main():
     ap.add_argument("--details", action="store_true", help="ambil splits/polyline/streams per aktivitas")
     ap.add_argument("--max-detail", type=int, default=25, help="batas fetch detail per run (default 25)")
     ap.add_argument("--best-efforts", action="store_true", help="hitung ulang best efforts dari splits (tanpa akses Garmin)")
+    ap.add_argument("--user-id", type=int, default=None, help="bind data ke user_id eksplisit (default: user dengan aktivitas terbanyak)")
     args = ap.parse_args()
 
     conn = get_db()
-    user_id = get_user_id(conn)
+    user_id = get_user_id(conn, args.user_id)
 
     if args.best_efforts:
         n = sync_best_efforts(conn, user_id)
