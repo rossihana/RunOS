@@ -7,6 +7,7 @@ import { env } from '../config/env.js';
 import { catchAsync } from '../utils/catchAsync.js';
 import { hashPassword, verifyPassword } from '../services/password.js';
 import { createResetToken, resetPassword } from '../services/passwordReset.js';
+import { sendVerificationEmail, verifyEmailToken, sendResetEmail } from '../services/emailTokens.js';
 
 const router = Router();
 const JWT_SECRET = env.JWT_SECRET;
@@ -67,8 +68,15 @@ router.post('/register', catchAsync(async (req: Request, res: Response) => {
   );
   const user = result.rows[0];
 
+  // Kirim email verifikasi (link berbasis). Kalau RESEND_API_KEY tak diset,
+  // mode personal: token tetap dikembalikan via response agar alur tetap bisa dipakai.
+  const rawToken = await sendVerificationEmail(user.id, cleanEmail);
   const token = issueSession(res, user.id, user);
-  res.status(201).json({ token, user });
+  if (env.RESEND_API_KEY) {
+    res.status(201).json({ token, user, verificationSent: true });
+  } else {
+    res.status(201).json({ token, user, verificationSent: false, verificationToken: rawToken });
+  }
 }));
 
 router.post('/login', catchAsync(async (req: Request, res: Response) => {
@@ -104,21 +112,52 @@ router.get('/me', authenticate, catchAsync(async (req: AuthRequest, res: Respons
   res.json(result.rows[0]);
 }));
 
+// ─── Verifikasi email (link berbasis) ───
+
+router.get('/verify-email', catchAsync(async (req: Request, res: Response) => {
+  const token = String(req.query.token || '');
+  if (!token) return res.status(400).json({ error: 'Token kosong' });
+  const result = await verifyEmailToken(token);
+  if (!result.ok) return res.status(400).json({ error: result.error });
+  res.json({ success: true, message: 'Email terverifikasi! Kamu bisa lanjut pakai RunOS.' });
+}));
+
+router.post('/resend-verification', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const r = await query('SELECT id, email, email_verified_at FROM users WHERE id = $1', [req.user?.id]);
+  const u = r.rows[0];
+  if (!u) return res.status(404).json({ error: 'User tidak ditemukan' });
+  if (u.email_verified_at) return res.json({ success: true, message: 'Email sudah terverifikasi.' });
+  const token = await sendVerificationEmail(u.id, u.email);
+  if (env.RESEND_API_KEY) {
+    res.json({ success: true, message: 'Email verifikasi dikirim ulang.' });
+  } else {
+    res.json({ success: true, message: 'Email verifikasi dikirim ulang.', verificationToken: token });
+  }
+}));
+
 router.post('/logout', (req: Request, res: Response) => {
   res.clearCookie('token');
   res.json({ success: true });
 });
 
-// ─── Reset password (personal deployment: token dikembalikan ke pemilik app) ───
+// ─── Reset password ───
+// Dengan email infra (RESEND_API_KEY): link dikirim ke email user — token TIDAK muncul di layar.
+// Tanpa infra (mode personal): token dikembalikan via response (pemilik = admin). Jangan dipakai publik.
 
 router.post('/forgot-password', catchAsync(async (req: Request, res: Response) => {
   const { email } = req.body || {};
   if (typeof email !== 'string') return res.status(400).json({ error: 'Email wajib diisi' });
-  const result = await createResetToken(email);
-  if ('error' in result) return res.status(404).json({ error: result.error });
-  // Personal deployment: token langsung dikembalikan (pemilik = admin). JANGAN dipakai
-  // multi-tenant publik tanpa mengganti ini dengan pengiriman email.
-  res.json({ resetToken: result.token, expiresIn: '1 hour' });
+  const r = await query('SELECT id, email FROM users WHERE email = $1', [email.trim().toLowerCase()]);
+  const u = r.rows[0];
+  if (env.RESEND_API_KEY) {
+    if (u) await sendResetEmail(u.email, u.id);
+    // Respons samar anti-enumeration: selalu sukses meski email tak terdaftar
+    return res.json({ success: true, message: 'Kalau email terdaftar, link reset sudah dikirim. Cek inbox (dan folder spam).' });
+  }
+  // Fallback personal (tanpa email infra)
+  if (!u) return res.status(404).json({ error: 'Email tidak terdaftar' });
+  const token = await sendResetEmail(u.email, u.id);
+  res.json({ resetToken: token, expiresIn: '1 hour' });
 }));
 
 router.post('/reset-password', catchAsync(async (req: Request, res: Response) => {

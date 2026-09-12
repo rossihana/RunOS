@@ -19,7 +19,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
-  const [forgotStep, setForgotStep] = useState<'email' | 'reset'>('email');
+  const [forgotStep, setForgotStep] = useState<'email' | 'reset' | 'sent'>('email');
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotToken, setForgotToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -63,23 +63,34 @@ export default function Login() {
   };
 
   const handleForgot = async () => {
-    setError('');
-    setLoading(true);
+    setError(''); setLoading(true);
     try {
-      if (forgotStep === 'email') {
-        const r = await api.post('/auth/forgot-password', { email: forgotEmail });
+      const r = await api.post('/auth/forgot-password', { email: forgotEmail });
+      if (r.data.resetToken) {
+        // Mode personal (tanpa email infra): token tampil di layar (pemilik = admin)
         setForgotToken(r.data.resetToken);
         setForgotStep('reset');
-        setError('');
       } else {
-        await api.post('/auth/reset-password', { token: forgotToken, password: newPassword });
-        alert('Password berhasil direset! Silakan login dengan password baru.');
-        setShowForgot(false);
-        setForgotStep('email');
-        setForgotEmail(''); setForgotToken(''); setNewPassword('');
+        // Mode email infra: link reset dikirim ke inbox
+        setForgotStep('sent');
       }
     } catch (err: any) {
       setError(err.response?.data?.error || 'Gagal memproses reset password');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetWithToken = async () => {
+    setError(''); setLoading(true);
+    try {
+      await api.post('/auth/reset-password', { token: forgotToken, password: newPassword });
+      alert('Password berhasil direset! Silakan login dengan password baru.');
+      setShowForgot(false);
+      setForgotStep('email');
+      setForgotEmail(''); setForgotToken(''); setNewPassword('');
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Reset gagal');
     } finally {
       setLoading(false);
     }
@@ -104,11 +115,11 @@ export default function Login() {
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white dark:bg-zinc-900 py-8 px-4 shadow-sm sm:rounded-2xl sm:px-10 border border-zinc-200 dark:border-zinc-800 transition-colors">
           {showForgot ? (
-            <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); handleForgot(); }}>
+            <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); forgotStep === 'reset' ? handleResetWithToken() : handleForgot(); }}>
               <h3 className="text-lg font-bold text-zinc-900 dark:text-white text-center">Reset Password</h3>
               {forgotStep === 'email' ? (
                 <>
-                  <p className="text-xs text-zinc-500 text-center">Masukkan email akunmu. Token reset akan diberikan oleh admin aplikasi (personal deployment).</p>
+                  <p className="text-xs text-zinc-500 text-center">Masukkan email akun RunOS-mu. Link reset akan dikirim ke email tersebut.</p>
                   <input
                     type="email"
                     required
@@ -117,6 +128,13 @@ export default function Login() {
                     placeholder="Email akun RunOS"
                     className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
                   />
+                </>
+              ) : forgotStep === 'sent' ? (
+                <>
+                  <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 px-4 py-4 text-center">
+                    <p className="text-sm font-bold text-emerald-700 dark:text-emerald-400">📬 Link reset terkirim!</p>
+                    <p className="text-xs text-zinc-500 mt-1">Buka email <span className="font-semibold">{forgotEmail}</span> dan klik link-nya untuk set password baru. (Cek folder spam kalau tidak ada.)</p>
+                  </div>
                 </>
               ) : (
                 <>
@@ -143,7 +161,7 @@ export default function Login() {
                 <div className="rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-4 py-3 text-sm text-red-600 dark:text-red-400">{error}</div>
               )}
               <button type="submit" disabled={loading} className="w-full rounded-xl bg-zinc-900 dark:bg-white dark:text-zinc-900 px-4 py-3 text-sm font-semibold text-white transition-colors disabled:opacity-50">
-                {loading ? 'Memproses...' : forgotStep === 'email' ? 'Minta Token Reset' : 'Simpan Password Baru'}
+                {loading ? 'Memproses...' : forgotStep === 'email' ? 'Kirim Link Reset' : forgotStep === 'reset' ? 'Simpan Password Baru' : 'Tutup'}
               </button>
               <button type="button" onClick={() => { setShowForgot(false); setError(''); }} className="w-full text-center text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
                 Kembali ke login

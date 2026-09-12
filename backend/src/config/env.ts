@@ -21,6 +21,13 @@ const envSchema = z.object({
   ENCRYPTION_KEY: z.string().regex(/^[0-9a-f]{64}$/i, 'ENCRYPTION_KEY harus 64 hex'),
   // Secret untuk trigger sync Garmin (header X-Sync-Secret). Kosong = endpoint sync mati.
   SYNC_SECRET: z.string().optional(),
+  // ── Email infra (Resend) ──
+  // Kalau kosong: fitur email mati (mode personal tanpa infra; token reset tetap dikembalikan via response).
+  RESEND_API_KEY: z.string().optional(),
+  // Domain sender yang sudah diverifikasi di Resend, contoh: noreply@runos.rossi.dev
+  MAIL_FROM: z.string().default('RunOS <noreply@runos.local>'),
+  // URL frontend (untuk link verifikasi/reset di email). Default utk dev lokal.
+  APP_URL: z.string().url().default('http://localhost:5173'),
 });
 
 const envParse = envSchema.safeParse(process.env);
