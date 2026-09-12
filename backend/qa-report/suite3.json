@@ -1,0 +1,62 @@
+[
+  {
+    "n": "ai: katalog model non-owner 200",
+    "p": true,
+    "d": "3 model"
+  },
+  {
+    "n": "ai: glm-5.3-flash TIDAK di katalog non-owner",
+    "p": true,
+    "d": "[\"b-ai/qwen3.8-flash\",\"b-ai/hy3\",\"b-ai/mimo-v2.5\"]"
+  },
+  {
+    "n": "ai: set model owner-only → ditolak",
+    "p": false,
+    "d": "status=200"
+  },
+  {
+    "n": "ai: set model free → ok",
+    "p": true,
+    "d": "status=200"
+  },
+  {
+    "n": "ai: add provider custom → ok",
+    "p": false,
+    "d": "status=400"
+  },
+  {
+    "n": "ai: test provider (endpoint mati) → error jelas, bukan hang",
+    "p": true,
+    "d": "status=404"
+  },
+  {
+    "n": "ai: hapus provider → ok",
+    "p": true,
+    "d": "status=200"
+  },
+  {
+    "n": "ai: idempotency — request kedua key sama → 409",
+    "p": false,
+    "d": "first=400 second=400"
+  },
+  {
+    "n": "ai: chat history 200",
+    "p": true,
+    "d": "status=200"
+  },
+  {
+    "n": "ai: clear chat history 200",
+    "p": true,
+    "d": "status=200"
+  },
+  {
+    "n": "ai: models tanpa token → 401",
+    "p": true,
+    "d": "status=401"
+  },
+  {
+    "n": "ai: chat tanpa token → 401",
+    "p": true,
+    "d": "status=401"
+  }
+]

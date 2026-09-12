@@ -6,6 +6,45 @@ import { AuthRequest } from './auth.js';
  * Rate limiter persisten (DB) — akurat lintas restart, instance, dan load balancer.
  * Slide window: hitung baris < window; bersihkan baris lawas saat INSERT.
  */
+
+// ── Login limiter (in-memory per IP) ──
+// Login belum punya user id, jadi limiter DB per-user tidak bisa dipakai.
+// In-memory cukup untuk single-instance; kalau multi-instance, naikkan ke Redis. // ponytail: pindah ke Redis saat deploy >1 instance
+const loginAttempts = new Map<string, number[]>();
+const LOGIN_LIMIT = 10;          // max attempt
+const LOGIN_WINDOW_MS = 15 * 60 * 1000; // per 15 menit
+
+export function loginRateLimit(req: Request, res: Response, next: NextFunction) {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const arr = (loginAttempts.get(ip) || []).filter(t => now - t < LOGIN_WINDOW_MS);
+  if (arr.length >= LOGIN_LIMIT) {
+    return res.status(429).json({ error: 'Terlalu banyak percobaan login. Coba lagi dalam 15 menit.' });
+  }
+  next();
+}
+
+/** Login sukses → hapus hitungan attempt IP ini (hanya attempt GAGAL yang dihitung). */
+export function loginAttemptSucceeded(req: Request) {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  loginAttempts.delete(ip);
+}
+
+/** Login gagal → catat 1 hit (dipanggil dari route sebelum mengirim 401). */
+export function loginAttemptFailed(req: Request) {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const arr = (loginAttempts.get(ip) || []).filter(t => now - t < LOGIN_WINDOW_MS);
+  arr.push(now);
+  loginAttempts.set(ip, arr);
+  // bersihkan entry lawas biar Map tidak bocor memori
+  if (loginAttempts.size > 1000) {
+    for (const [k, v] of loginAttempts) {
+      if (!v.some(t => now - t < LOGIN_WINDOW_MS)) loginAttempts.delete(k);
+    }
+  }
+}
+
 export function aiRateLimit(endpoint: string, limit: number, windowSec = 60) {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
     const userId = req.user?.id;

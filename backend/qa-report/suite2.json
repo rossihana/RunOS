@@ -1,0 +1,97 @@
+[
+  {
+    "name": "authz: B lihat aktivitas A → 403/404",
+    "pass": true,
+    "detail": "status=404"
+  },
+  {
+    "name": "authz: A lihat aktivitas sendiri → 200",
+    "pass": true,
+    "detail": "status=200"
+  },
+  {
+    "name": "readiness: B (0 data) → 200 array kosong ok",
+    "pass": true,
+    "detail": "status=200"
+  },
+  {
+    "name": "summary A: 200",
+    "pass": true,
+    "detail": "status=200"
+  },
+  {
+    "name": "charts A: 200",
+    "pass": true,
+    "detail": "status=200"
+  },
+  {
+    "name": "recent-trend A: 200",
+    "pass": true,
+    "detail": "status=200"
+  },
+  {
+    "name": "training-log A: 200",
+    "pass": true,
+    "detail": "status=200"
+  },
+  {
+    "name": "injection: path SQLi → bukan 500",
+    "pass": false,
+    "detail": "status=500"
+  },
+  {
+    "name": "aktivitas tak ada → 404",
+    "pass": true,
+    "detail": "status=404"
+  },
+  {
+    "name": "id non-numerik → 400",
+    "pass": false,
+    "detail": "status=500"
+  },
+  {
+    "name": "races list A: 200",
+    "pass": true,
+    "detail": "status=200"
+  },
+  {
+    "name": "races: create → 201",
+    "pass": false,
+    "detail": "status=400"
+  },
+  {
+    "name": "races: nama kosong ditolak",
+    "pass": true,
+    "detail": "status=400"
+  },
+  {
+    "name": "garmin: connect tanpa acceptTerms → 403",
+    "pass": true,
+    "detail": "status=403"
+  },
+  {
+    "name": "garmin: connect + acceptTerms → 200",
+    "pass": true,
+    "detail": "status=200"
+  },
+  {
+    "name": "garmin: status connected=true TANPA kredensial bocor",
+    "pass": true,
+    "detail": "{\"status\":null,\"connected\":true}"
+  },
+  {
+    "name": "garmin: sync user B (belum connect) → 400",
+    "pass": true,
+    "detail": "status=400"
+  },
+  {
+    "name": "legacy /sync tanpa secret → 403",
+    "pass": true,
+    "detail": "status=403"
+  },
+  {
+    "name": "sync secret salah → 403",
+    "pass": false,
+    "detail": "status=404"
+  }
+]

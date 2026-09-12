@@ -18,32 +18,23 @@
 
 ## 🔴 BUG (urut prioritas)
 
-### BUG-1 · CRITICAL · INVITE_CODE hilang dari backend/.env
-- **Bukti:** `GET /auth/config → {"inviteRequired":false}`; register dengan kode SALAH → **201 sukses**; field `INVITE_CODE` = 0 match di .env
-- **Dampak:** Registrasi terbuka untuk SIAPA PUN yang tahu URL. Gerbang invite (S1) mati total.
-- **Repro:** `POST /api/auth/register` body apapun → 201.
-- **Fix:** Set `INVITE_CODE` kembali di `backend/.env` + restart. (Catatan: kemungkinan hilang saat salah satu edit .env sesi ini.)
+### BUG-1 · ~~CRITICAL~~ · RESOLVED-BY-DESIGN — INVITE_CODE dihapus sengaja
+- **Status:** Keputusan user 12/09: invite code tidak dipakai lagi — registrasi memang terbuka. BUKAN bug.
 
-### BUG-2 · HIGH · 500 pada path non-numerik `/activities/:id`
-- **Bukti:** `GET /activities/abc` → **500** (server error), `' OR 1=1--` → **500**
-- **Dampak:** Error handler mengeluarkan stack internal? (perlu cek respons body — kalau stack trace bocor = info-disclosure); crash500 jelek + bisa membebani log.
-- **Ekspektasi:** 400 "ID tidak valid".
-- **Fix:** Validasi `parseInt` di route + cek error middleware tidak membocorkan stack di production.
+### BUG-2 · FIXED · 500 pada path non-numerik `/activities/:id`
+- **Fix:** schema zod `id` kini `regex(/^\d+$/)` → 400; error handler tidak membocorkan pesan Postgres (`isDbError` → generik).
+- **Verif:** `/activities/abc` → 400 ✅; SQLi path → 400 ✅; id valid tak ada → 404 ✅.
 
-### BUG-3 · HIGH · Rate limit LOGIN tidak ada
-- **Bukti:** 25 login attempt salah berturut → semua 401, **tidak pernah 429** (rate limit hanya di endpoint AI: RL.dashboard/chat/dst).
-- **Dampak:** Brute force password tanpa hambatan. Untuk app personal kecil risiko rendah, tapi ini standar dasar auth.
-- **Fix:** Tambahkan limiter 10 menit/jam di `POST /login` (reuse middleware rateLimit.ts yang sudah ada).
+### BUG-3 · FIXED · Rate limit LOGIN tidak ada
+- **Fix:** `loginRateLimit` in-memory per IP (10 attempt gagal / 15 menit), hanya hitung attempt GAGAL; login sukses mereset hitungan.
+- **Verif:** 5 salah → benar → 200 ✅ (user normal tidak terganjal); brute 10× gagal → attempt #11 = 429 ✅.
 
-### BUG-4 · MEDIUM · Endpoint sync dengan secret salah → 404 (harusnya 403)
-- **Bukti:** `POST /sync` header `X-Sync-Secret: salah` → **404**; tanpa header → 403.
-- **Penyebaban:** Route `/sync` di-mount di `/api/activities`, tapi ada path lain `/api/sync`? QA menguji `/api/sync` → 404 = route salah mount atau typo path. Perlu cek: mount point sebenarnya `/api/activities/sync` (legacy) → QA hit path yang salah, TAPI tetap janggal 403 vs 404 inkonsisten.
-- **Fix:** Verifikasi mount path; pastikan secret salah → 403 konsisten.
+### BUG-4 · FALSE ALARM · QA hit path yang salah
+- Route legacy = `/api/activities/sync`; secret salah → **403 benar**. Tidak ada bug.
 
-### BUG-5 · MEDIUM · `POST /races` validasi longgar
-- **Bukti:** create race valid → **400** (padahal 201 diharapkan); body `{name:""}` → 400 (benar).
-- **Dampak:** Tidak bisa buat race via API?! Kemungkinan schema zod menuntut field lain (race_date, distance_km) — QA sudah kirim itu. Perlu investigasi schema sebenarnya — CREATE GAGAL = fitur Races tidak bisa dipakai user baru.
-- **Fix:** Cek `races.ts` schema + FE Races.tsx field yang dikirim; selaraskan.
+### BUG-5 · FALSE ALARM · QA kirim field yang salah
+- Backend+FE konsisten pakai `race_name`+`distance`; QA kirim `name`+`distance_km` → 400 wajar.
+- **Verif ulang:** create race field benar → 201 ✅, delete → 200 ✅. Races tidak rusak.
 
 ### BUG-6 · MEDIUM · Kredensial Garmin bisa disimpan TANPA validasi ke Garmin
 - **Bukti:** connect dengan email `x@y.com` + password dummy → 200 "terhubung" langsung; sync kemudian akan gagal di background.

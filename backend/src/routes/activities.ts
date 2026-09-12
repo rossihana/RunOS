@@ -137,7 +137,7 @@ router.get('/lab', authenticate, async (req: AuthRequest, res) => {
 
 const activityIdSchema = z.object({
   params: z.object({
-    id: z.string().min(1)
+    id: z.string().regex(/^\d+$/, 'ID harus numerik').min(1)
   })
 });
 

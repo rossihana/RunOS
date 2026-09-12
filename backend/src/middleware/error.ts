@@ -29,11 +29,13 @@ export const globalErrorHandler = (
   console.error(`[${req.method} ${req.path}] ${err.statusCode}:`, err.message);
 
   // K6: stack trace JANGAN dikirim ke klien, di dev maupun production.
-  // Pesan detail hanya untuk error operasional (isOperational), sisanya generik.
+  // Pesan detail hanya untuk error operasional (AppError). Error tak terduga
+  // (termasuk error internal Postgres) → generik, agar tidak bocor ke klien.
+  const isDbError = /invalid input syntax|relation .* does not exist|syntax error/i.test(String(err.message || ''));
   const message =
-    err.isOperational || env.NODE_ENV === 'development'
+    err.isOperational || (env.NODE_ENV === 'development' && !isDbError)
       ? err.message
-      : 'Something went very wrong!';
+      : 'Terjadi kesalahan pada server.';
 
   res.status(err.statusCode).json({
     status: err.status,

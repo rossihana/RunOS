@@ -8,6 +8,7 @@ import { catchAsync } from '../utils/catchAsync.js';
 import { hashPassword, verifyPassword } from '../services/password.js';
 import { createResetToken, resetPassword } from '../services/passwordReset.js';
 import { sendVerificationEmail, verifyEmailToken, sendResetEmail } from '../services/emailTokens.js';
+import { loginRateLimit, loginAttemptFailed, loginAttemptSucceeded } from '../middleware/rateLimit.js';
 
 const router = Router();
 const JWT_SECRET = env.JWT_SECRET;
@@ -79,7 +80,7 @@ router.post('/register', catchAsync(async (req: Request, res: Response) => {
   }
 }));
 
-router.post('/login', catchAsync(async (req: Request, res: Response) => {
+router.post('/login', loginRateLimit, catchAsync(async (req: Request, res: Response) => {
   const { email, password } = req.body || {};
   const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
@@ -93,8 +94,10 @@ router.post('/login', catchAsync(async (req: Request, res: Response) => {
   );
   const user = result.rows[0];
   if (!user || !verifyPassword(password, user.password_hash)) {
+    loginAttemptFailed(req); // hitung hanya attempt GAGAL
     return res.status(401).json({ error: 'Email atau password salah' });
   }
+  loginAttemptSucceeded(req); // reset hitungan gagal untuk IP ini
 
   const safeUser = { id: user.id, email: user.email, first_name: user.first_name, last_name: user.last_name };
   const token = issueSession(res, user.id, safeUser);
