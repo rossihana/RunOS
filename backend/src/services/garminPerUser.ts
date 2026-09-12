@@ -124,10 +124,15 @@ export async function queueAllConnected(days?: number, details = false): Promise
   return r.rows.length;
 }
 
-/** Handler: simpan kredensial Garmin user (JWT auth). */
+/** Handler: simpan kredensial Garmin user (JWT auth). GATE: ToS wajib disetujui dulu. */
+export const TERMS_VERSION = '2026-09-12';
+
 export async function connectHandler(req: Request, res: Response) {
   const userId = (req as any).user?.id;
-  const { email, password } = req.body || {};
+  const { email, password, acceptTerms } = req.body || {};
+  if (acceptTerms !== true) {
+    return res.status(403).json({ error: 'Kamu harus menyetujui Terms of Service & Privacy Policy dulu.' });
+  }
   if (typeof email !== 'string' || !email.includes('@')) {
     return res.status(400).json({ error: 'Email Garmin tidak valid' });
   }
@@ -135,6 +140,11 @@ export async function connectHandler(req: Request, res: Response) {
     return res.status(400).json({ error: 'Password Garmin tidak valid' });
   }
   await saveGarminCredentials(userId, email, password);
+  // catat persetujuan ToS (idempoten untuk user lama yang re-connect)
+  await query(
+    `UPDATE users SET terms_accepted_at = now(), terms_version = $1 WHERE id = $2`,
+    [TERMS_VERSION, userId]
+  );
   res.json({ success: true, message: 'Garmin terhubung. Sync bisa dijalankan dari Dashboard.' });
 }
 

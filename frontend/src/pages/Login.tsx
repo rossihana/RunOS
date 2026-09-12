@@ -43,7 +43,13 @@ export default function Login() {
         ...(mode === 'register' ? { name, inviteCode: inviteCode || undefined } : {}),
       });
       localStorage.setItem('token', response.data.token);
-      window.location.href = '/';
+      // Opsi 2: setelah daftar → onboarding Garmin (bukan dashboard kosong)
+      if (mode === 'register') {
+        localStorage.setItem('runos_just_registered', '1');
+        window.location.href = '/garmin';
+      } else {
+        window.location.href = '/';
+      }
     } catch (err: any) {
       const serverMsg = err.response?.data?.error || 'Terjadi kesalahan. Coba lagi.';
       // Server menuntut kode undangan -> tampilkan field (sekali, lalu persist di mode register)

@@ -1,12 +1,19 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Watch, CheckCircle2, RefreshCw, Activity } from 'lucide-react';
+import { ArrowLeft, Watch, CheckCircle2, RefreshCw, Activity, PartyPopper } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 
 export default function GarminSettings() {
+  const [fromRegister, setFromRegister] = useState(
+    () => localStorage.getItem('runos_just_registered') === '1'
+  );
+  useEffect(() => {
+    if (fromRegister) localStorage.removeItem('runos_just_registered');
+  }, [fromRegister]);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [gEmail, setGEmail] = useState('');
   const [gPass, setGPass] = useState('');
+  const [acceptTerms, setAcceptTerms] = useState(false);
   const [busy, setBusy] = useState<'connect' | 'sync' | null>(null);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
@@ -27,9 +34,10 @@ export default function GarminSettings() {
   useEffect(() => { loadStatus(); }, []);
 
   const connect = async () => {
+    if (!acceptTerms) { setMsg('⚠️ Setujui Terms of Service & Privacy Policy dulu untuk melanjutkan.'); return; }
     setBusy('connect'); setMsg('');
     try {
-      await api.post('/activities/garmin/connect', { email: gEmail, password: gPass });
+      await api.post('/activities/garmin/connect', { email: gEmail, password: gPass, acceptTerms: true });
       setConnected(true);
       setGEmail(''); setGPass('');
       setMsg('✅ Garmin terhubung! Sync harian otomatis aktif (tiap pagi 07:00).');
@@ -53,6 +61,18 @@ export default function GarminSettings() {
   return (
     <div className="max-w-2xl mx-auto">
       {/* Header */}
+      {fromRegister && (
+        <div className="mb-6 rounded-2xl bg-gradient-to-r from-orange-500/10 to-amber-500/10 border border-orange-200 dark:border-orange-900/50 px-5 py-4 flex items-start gap-3">
+          <PartyPopper className="w-5 h-5 text-orange-500 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-bold text-zinc-900 dark:text-white">Akun RunOS-mu jadi! 🎉</p>
+            <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">
+              Satu langkah terakhir: hubungkan Garmin-mu di bawah supaya data lari langsung masuk.
+              Setelah terhubung, semua otomatis — sync harian jam 07:00 pagi.
+            </p>
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-4 mb-6">
         <Link to="/" className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-zinc-500">
           <ArrowLeft className="w-5 h-5" />
@@ -124,9 +144,23 @@ export default function GarminSettings() {
                 placeholder="Password Garmin"
                 className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
               />
+
+              {/* ToS gate */}
+              <label className="flex items-start gap-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 px-3 py-3 cursor-pointer">
+                <input
+                  type="checkbox" checked={acceptTerms} onChange={e => setAcceptTerms(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded accent-orange-600 shrink-0"
+                />
+                <span className="text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-400">
+                  Aku mengizinkan RunOS memakai email &amp; password Garmin-ku untuk sinkronisasi data (tersimpan terenkripsi, read-only), dan aku menyetujui{' '}
+                  <Link to="/terms" target="_blank" className="font-semibold text-orange-600 hover:underline">Terms of Service</Link> serta{' '}
+                  <Link to="/privacy" target="_blank" className="font-semibold text-orange-600 hover:underline">Privacy Policy</Link> RunOS.
+                </span>
+              </label>
+
               <button
                 onClick={connect}
-                disabled={busy !== null || !gEmail || !gPass}
+                disabled={busy !== null || !gEmail || !gPass || !acceptTerms}
                 className="w-full py-3 rounded-xl bg-orange-600 text-white text-sm font-bold hover:bg-orange-700 disabled:opacity-40 transition-colors"
               >
                 {busy === 'connect' ? 'Menghubungkan…' : 'Hubungkan Garmin'}

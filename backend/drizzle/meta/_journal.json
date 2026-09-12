@@ -71,6 +71,13 @@
       "when": 1786809600000,
       "tag": "0009_password_reset",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786896000000,
+      "tag": "0010_terms_gate",
+      "breakpoints": true
     }
   ]
 }
