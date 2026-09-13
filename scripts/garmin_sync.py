@@ -382,8 +382,20 @@ def main():
     ap.add_argument("--details", action="store_true", help="ambil splits/polyline/streams per aktivitas")
     ap.add_argument("--max-detail", type=int, default=25, help="batas fetch detail per run (default 25)")
     ap.add_argument("--best-efforts", action="store_true", help="hitung ulang best efforts dari splits (tanpa akses Garmin)")
+    ap.add_argument("--verify-only", action="store_true", help="BUG-6: cek kredensial login valid, tanpa sync (dipakai saat connect)")
     ap.add_argument("--user-id", type=int, default=None, help="bind data ke user_id eksplisit (default: user dengan aktivitas terbanyak)")
     args = ap.parse_args()
+
+    if args.verify_only:
+        from garminconnect import Garmin
+        c = Garmin(email=need("GARMIN_EMAIL"), password=need("GARMIN_PASSWORD"))
+        c.login(tokenstore=TOKENSTORE)
+        try:
+            c.client.dump(TOKENSTORE)
+        except Exception:
+            pass
+        print("VERIFY_OK")
+        return
 
     conn = get_db()
     user_id = get_user_id(conn, args.user_id)

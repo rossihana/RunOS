@@ -124,6 +124,35 @@ export async function queueAllConnected(days?: number, details = false): Promise
   return r.rows.length;
 }
 
+/** Verifikasi kredensial Garmin dengan login beneran (spawn --verify-only). ~5-15 dtk. */
+async function verifyGarminCredentials(email: string, password: string): Promise<{ ok: boolean; error?: string }> {
+  const { encrypt } = await import('./crypto.js');
+  return new Promise((resolve) => {
+    const child = spawn(VENV_PY, [SCRIPT, '--verify-only'], {
+      windowsHide: true,
+      cwd: 'D:/PROJECT/RunOS/scripts',
+      env: {
+        ...process.env,
+        GARMIN_EMAIL: email,
+        GARMIN_PASSWORD: password,
+        GARMIN_TOKENSTORE_DIR: `${LOG_DIR}/tokens/verify_${Date.now()}`, // throwaway: jangan pakai tokenstore user
+      },
+    });
+    let out = '';
+    child.stdout?.on('data', (d: Buffer) => { out += d; });
+    child.stderr?.on('data', (d: Buffer) => { out += d; });
+    const t = setTimeout(() => { child.kill(); resolve({ ok: false, error: 'Verifikasi terlalu lama (timeout). Coba lagi.' }); }, 60_000);
+    child.on('close', (code) => {
+      clearTimeout(t);
+      if (code === 0 && out.includes('VERIFY_OK')) return resolve({ ok: true });
+      const msg = /403|too many|rate/i.test(out)
+        ? 'Garmin menolak login terlalu sering (rate-limit). Tunggu beberapa menit lalu coba lagi.'
+        : 'Email atau password Garmin salah.';
+      resolve({ ok: false, error: msg });
+    });
+  });
+}
+
 /** Handler: simpan kredensial Garmin user (JWT auth). GATE: ToS wajib disetujui dulu. */
 export const TERMS_VERSION = '2026-09-12';
 
@@ -139,13 +168,18 @@ export async function connectHandler(req: Request, res: Response) {
   if (typeof password !== 'string' || password.length < 4) {
     return res.status(400).json({ error: 'Password Garmin tidak valid' });
   }
+  // BUG-6 fix: kredensial diverifikasi ke Garmin SEBELUM disimpan — tidak ada lagi "terhubung palsu"
+  const v = await verifyGarminCredentials(email.trim().toLowerCase(), password);
+  if (!v.ok) {
+    return res.status(400).json({ error: v.error });
+  }
   await saveGarminCredentials(userId, email, password);
   // catat persetujuan ToS (idempoten untuk user lama yang re-connect)
   await query(
     `UPDATE users SET terms_accepted_at = now(), terms_version = $1 WHERE id = $2`,
     [TERMS_VERSION, userId]
   );
-  res.json({ success: true, message: 'Garmin terhubung. Sync bisa dijalankan dari Dashboard.' });
+  res.json({ success: true, message: 'Kredensial Garmin valid & tersimpan terenkripsi. Silakan sync.' });
 }
 
 /** Handler: status sync user (JWT auth). */

@@ -106,13 +106,13 @@ router.post('/login', loginRateLimit, catchAsync(async (req: Request, res: Respo
 
 router.get('/me', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
   const result = await query(
-    'SELECT id, email, first_name, last_name, profile_picture FROM users WHERE id = $1',
+    'SELECT id, email, first_name, last_name, profile_picture, email_verified_at FROM users WHERE id = $1',
     [req.user?.id]
   );
   if (result.rows.length === 0) {
     return res.status(404).json({ error: 'User not found' });
   }
-  res.json(result.rows[0]);
+  res.json({ ...result.rows[0], emailVerified: !!result.rows[0].email_verified_at });
 }));
 
 // ─── Verifikasi email (link berbasis) ───

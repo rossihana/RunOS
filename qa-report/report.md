@@ -36,15 +36,13 @@
 - Backend+FE konsisten pakai `race_name`+`distance`; QA kirim `name`+`distance_km` → 400 wajar.
 - **Verif ulang:** create race field benar → 201 ✅, delete → 200 ✅. Races tidak rusak.
 
-### BUG-6 · MEDIUM · Kredensial Garmin bisa disimpan TANPA validasi ke Garmin
-- **Bukti:** connect dengan email `x@y.com` + password dummy → 200 "terhubung" langsung; sync kemudian akan gagal di background.
-- **Dampak:** User typo password → "terhubung" palsu → bingung kenapa data tak masuk. ToS gate jalan, tapi validasi kredensial nyata tidak.
-- **Fix (disarankan):** Saat connect, lakukan login Garmin dummy 1× (via queue) → kalau gagal, tolak dengan pesan jelas. Atau: tampilkan warning "kredensial belum diverifikasi".
+### BUG-6 · FIXED · Kredensial Garmin bisa disimpan TANPA validasi
+- **Fix:** connectHandler kini menjalankan login Garmin **beneran** (spawn `--verify-only`, timeout 60s, tokenstore throwaway) sebelum menyimpan. Gagal → 400 dengan pesan spesifik (salah kredensial vs rate-limit Garmin).
+- **Verif:** kredensial palsu → 400 "Email atau password Garmin salah / rate-limit" ✅; ToS gate tetap 403 ✅.
 
-### BUG-7 · LOW · `email_verified_at` tidak dipakai sebagai gate apa pun
-- **Bukti:** User baru register → bisa langsung pakai semua fitur tanpa verifikasi email (login, activities, AI). Email verifikasi terkirim tapi tidak diwajibkan.
-- **Dampak:** Verifikasi email saat ini hanya kosmetik. OK untuk personal, tapi kalau tujuannya anti-email-palsu → harus jadi gate (blokir akses sampai verified, atau banner + batasan fitur).
-- **Fix:** Keputusan produk: (a) wajib verified untuk login/sync pertama, atau (b) banner pengingat saja. Implement minimal: banner di dashboard + indikator di /me.
+### BUG-7 · FIXED (banner) · email_verified_at tidak dipakai
+- **Fix (pilihan produk: banner, bukan gate):** `/auth/me` mengirim `emailVerified`; Layout menampilkan banner amber "Email belum terverifikasi" + tombol "Kirim ulang" di semua halaman sampai verified.
+- **Verif:** `/me` flag boolean ✅; banner aktif utk user unverified ✅.
 
 ### BUG-8 · LOW · Akun owner tidak bisa dites QA (password tak diketahui)
 - Password owner (`rossi.hana@gmail.com`) bukan `RunosLari2026!` (yang kuset kemarin) — kemungkinan user mengganti password lewat alur reset email yang user uji sendiri. BUKAN bug — tapi QA suite data-nyata (analytics owner dengan 226 aktivitas) ter-cover pakai user QA dummy dengan data sintetis. Verifikasi analytics dengan data asli masih belum dilakukan → rekomendasi: jalankan ulang suite 5 setelah owner kirim password QA saat ini.

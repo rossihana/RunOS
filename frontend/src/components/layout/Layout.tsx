@@ -1,9 +1,35 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Activity, LayoutDashboard, Flag, LogOut, Menu, Sparkles, ClipboardList, FlaskConical, Cpu, Watch } from 'lucide-react';
-import { useState } from 'react';
+import { Activity, LayoutDashboard, Flag, LogOut, Menu, Sparkles, ClipboardList, FlaskConical, Cpu, Watch, MailWarning } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import api from '../../services/api';
 import { ThemeToggle } from './ThemeToggle';
+
+/** Banner "email belum terverifikasi" — muncul sampai user klik link di email. */
+function VerifyBanner() {
+  const [show, setShow] = useState(false);
+  const [sent, setSent] = useState(false);
+  useEffect(() => {
+    api.get('/auth/me').then(r => {
+      if (r.data?.emailVerified === false) setShow(true);
+    }).catch(() => {});
+  }, []);
+  if (!show) return null;
+  return (
+    <div className="mb-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 px-4 py-3 flex items-center gap-3">
+      <MailWarning className="w-5 h-5 text-amber-500 shrink-0" />
+      <p className="text-xs text-amber-800 dark:text-amber-300 flex-1">
+        Email belum terverifikasi — cek inbox untuk link verifikasi (cek folder spam juga).
+      </p>
+      <button
+        onClick={() => api.post('/auth/resend-verification').then(() => setSent(true)).catch(() => {})}
+        className="text-[10px] font-bold text-amber-700 dark:text-amber-400 hover:underline shrink-0"
+      >
+        {sent ? 'Terkirim ✓' : 'Kirim ulang'}
+      </button>
+    </div>
+  );
+}
 
 export default function Layout() {
   const location = useLocation();
@@ -135,6 +161,7 @@ export default function Layout() {
         {/* Page content (Scrollable area) */}
         <main className="flex-1 overflow-y-auto p-4 md:p-8 relative">
           <div className="max-w-7xl mx-auto min-h-full">
+            <VerifyBanner />
             <AnimatePresence mode="wait">
               <motion.div
                 key={location.pathname}
