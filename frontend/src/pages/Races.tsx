@@ -47,6 +47,7 @@ export default function Races() {
   const [races, setRaces] = useState<Race[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [selectedRaceForLink, setSelectedRaceForLink] = useState<Race | null>(null);
@@ -752,27 +753,29 @@ export default function Races() {
   }
 
   function ActivityPickerModal() {
-    // Filter: nama ATAU tanggal (mis. "mei" / "3 mei" / "10k")
+    // Tanggal LOKAL (bukan UTC) — bug: run subuh tersimpan UTC H-1, tampil salah hari
+    const actDate = (a: any) => new Date(a.start_date_local || a.start_date);
+    // Filter: nama ATAU tanggal (mis. "mei" / "3 mei") DAN filter tanggal eksplisit (kalau dipilih)
     const filteredActivities = activities.filter(activity => {
       const q = searchQuery.toLowerCase();
-      if (!q) return true;
-      const nameMatch = activity.name.toLowerCase().includes(q);
-      const dateMatch = format(new Date(activity.start_date), 'MMM d, yyyy').toLowerCase().includes(q);
-      return nameMatch || dateMatch;
+      const nameMatch = !q || activity.name.toLowerCase().includes(q);
+      const dateMatch = !q || format(actDate(activity), 'MMM d, yyyy').toLowerCase().includes(q);
+      const dayMatch = !dateFilter || format(actDate(activity), 'yyyy-MM-dd') === dateFilter;
+      return nameMatch && dayMatch;
     }).sort((a, b) => {
       // Kalau linking race: urutkan yang TERDEKAT dengan tanggal race dulu (deteksi otomatis)
       if (selectedRaceForLink) {
         const rd = new Date(selectedRaceForLink.race_date).getTime();
-        const da = Math.abs(new Date(a.start_date).getTime() - rd);
-        const db = Math.abs(new Date(b.start_date).getTime() - rd);
+        const da = Math.abs(actDate(a).getTime() - rd);
+        const db = Math.abs(actDate(b).getTime() - rd);
         return da - db;
       }
-      return new Date(b.start_date).getTime() - new Date(a.start_date).getTime(); // default: terbaru
+      return actDate(b).getTime() - actDate(a).getTime(); // default: terbaru
     });
 
     // Estimasi kandidat terbaik: sehari dengan race & jarak paling mendekati
     const raceDateStr = selectedRaceForLink ? new Date(selectedRaceForLink.race_date).toDateString() : null;
-    const isSameDay = (a: any) => raceDateStr && new Date(a.start_date).toDateString() === raceDateStr;
+    const isSameDay = (a: any) => raceDateStr && actDate(a).toDateString() === raceDateStr;
 
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
@@ -782,12 +785,12 @@ export default function Races() {
                <h2 className="text-xl font-black text-zinc-900 dark:text-white">Select Activity</h2>
                <p className="text-xs text-zinc-500 font-medium">{selectedRaceForLink ? `Which run is your ${selectedRaceForLink.race_name}?` : "Select a run to add to your gallery"}</p>
              </div>
-             <button onClick={() => { setIsPickerOpen(false); setSearchQuery(""); }} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors">
+             <button onClick={() => { setIsPickerOpen(false); setSearchQuery(""); setDateFilter(""); }} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors">
                <X className="w-5 h-5 text-zinc-400" />
              </button>
           </div>
           
-          <div className="px-8 py-4 border-b border-zinc-50 dark:border-zinc-800/50 bg-zinc-50/30 dark:bg-zinc-800/10">
+          <div className="px-8 py-4 border-b border-zinc-50 dark:border-zinc-800/50 bg-zinc-50/30 dark:bg-zinc-800/10 space-y-2">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
               <input
@@ -795,9 +798,29 @@ export default function Races() {
                 placeholder={selectedRaceForLink ? "Cari nama / tanggal (mis. 'mei')..." : "Search activities by name..."}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all shadow-sm"
+                className="w-full pl-10 pr-4 py-2 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all shadow-sm"
                 autoFocus
               />
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                className="flex-1 px-3 py-2 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all shadow-sm dark:[color-scheme:dark]"
+                title="Filter by date"
+              />
+              {dateFilter && (
+                <button
+                  onClick={() => setDateFilter("")}
+                  className="px-3 py-2 text-[10px] font-bold text-zinc-500 hover:text-zinc-900 dark:hover:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl transition-colors shrink-0"
+                >
+                  ✕ Clear
+                </button>
+              )}
+              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider shrink-0">
+                {dateFilter ? `${filteredActivities.length} run` : `${activities.length} run`}
+              </span>
             </div>
           </div>
           
@@ -831,7 +854,7 @@ export default function Races() {
                         )}
                       </div>
                       <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                        {format(new Date(activity.start_date), 'MMM d, yyyy')} • {(activity.distance/1000).toFixed(2)} km
+                        {format(actDate(activity), 'MMM d, yyyy')} • {(activity.distance/1000).toFixed(2)} km
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-zinc-300 group-hover:text-orange-600 group-hover:translate-x-1 transition-all" />
