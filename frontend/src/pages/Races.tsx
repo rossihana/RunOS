@@ -98,7 +98,8 @@ export default function Races() {
   const fetchActivities = async () => {
     setLoadingActivities(true);
     try {
-      const response = await api.get("/activities?limit=20");
+      // Ambil SEMUA aktivitas (bukan 20 terakhir) — bug: race lama (mis. Mei) tak pernah muncul di picker
+      const response = await api.get("/activities");
       setActivities(response.data);
     } catch (error) {
       console.error("Failed to fetch activities", error);
@@ -751,9 +752,27 @@ export default function Races() {
   }
 
   function ActivityPickerModal() {
-    const filteredActivities = activities.filter(activity => 
-      activity.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    // Filter: nama ATAU tanggal (mis. "mei" / "3 mei" / "10k")
+    const filteredActivities = activities.filter(activity => {
+      const q = searchQuery.toLowerCase();
+      if (!q) return true;
+      const nameMatch = activity.name.toLowerCase().includes(q);
+      const dateMatch = format(new Date(activity.start_date), 'MMM d, yyyy').toLowerCase().includes(q);
+      return nameMatch || dateMatch;
+    }).sort((a, b) => {
+      // Kalau linking race: urutkan yang TERDEKAT dengan tanggal race dulu (deteksi otomatis)
+      if (selectedRaceForLink) {
+        const rd = new Date(selectedRaceForLink.race_date).getTime();
+        const da = Math.abs(new Date(a.start_date).getTime() - rd);
+        const db = Math.abs(new Date(b.start_date).getTime() - rd);
+        return da - db;
+      }
+      return new Date(b.start_date).getTime() - new Date(a.start_date).getTime(); // default: terbaru
+    });
+
+    // Estimasi kandidat terbaik: sehari dengan race & jarak paling mendekati
+    const raceDateStr = selectedRaceForLink ? new Date(selectedRaceForLink.race_date).toDateString() : null;
+    const isSameDay = (a: any) => raceDateStr && new Date(a.start_date).toDateString() === raceDateStr;
 
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
@@ -773,7 +792,7 @@ export default function Races() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
               <input
                 type="text"
-                placeholder="Search activities by name..."
+                placeholder={selectedRaceForLink ? "Cari nama / tanggal (mis. 'mei')..." : "Search activities by name..."}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all shadow-sm"
@@ -803,7 +822,14 @@ export default function Races() {
                     className="w-full text-left p-4 rounded-2xl border border-transparent hover:border-zinc-200 dark:hover:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-all flex justify-between items-center group"
                   >
                     <div className="min-w-0">
-                      <div className="text-sm font-bold text-zinc-900 dark:text-white truncate">{activity.name}</div>
+                      <div className="text-sm font-bold text-zinc-900 dark:text-white truncate flex items-center gap-2">
+                        {activity.name}
+                        {isSameDay(activity) && (
+                          <span className="shrink-0 text-[9px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 rounded-full px-2 py-0.5">
+                            Race day
+                          </span>
+                        )}
+                      </div>
                       <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
                         {format(new Date(activity.start_date), 'MMM d, yyyy')} • {(activity.distance/1000).toFixed(2)} km
                       </div>
