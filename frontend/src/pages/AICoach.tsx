@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Sparkles, ArrowLeft, Trash2, Settings } from 'lucide-react';
+import { Send, Bot, User, Sparkles, ArrowLeft, Trash2, Settings, Radio } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 import ReactMarkdown from 'react-markdown';
@@ -16,9 +16,24 @@ export default function AICoach() {
   const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [streaming, setStreaming] = useState(false); // true saat jawaban AI sedang mengalir di background
+  const [streamPreview, setStreamPreview] = useState('');
   const [chatModel, setChatModel] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [chatWidth, setChatWidth] = useState(() => Number(localStorage.getItem('runos_chat_width')) || 896);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // ── Persist streaming ke localStorage ──
+  // (bug: pindah route saat chat → komponen unmount → stream & jawaban hilang.
+  //  Kini: delta ditulis ke localStorage segera; saat balik ke /ai-coach, chat dilanjutkan.)
+  const STREAM_KEY = 'runos_chat_streaming';
+  const saveStream = (partial: string) => {
+    try { localStorage.setItem(STREAM_KEY, partial); } catch { /* quota */ }
+  };
+  const finishStream = (full: string) => {
+    try { localStorage.removeItem(STREAM_KEY); } catch { /* ignore */ }
+    return full;
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -57,6 +72,42 @@ export default function AICoach() {
     })();
   }, []);
 
+  // ── Lanjutkan stream yang sedang berjalan (saat balik ke route ini) ──
+  useEffect(() => {
+    const partial = localStorage.getItem(STREAM_KEY);
+    if (partial === null) return; // tidak ada stream aktif
+    setStreaming(true);
+    setMessages(prev => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (last?.role === 'assistant' && !last.content) {
+        next[next.length - 1] = { role: 'assistant', content: partial };
+      } else {
+        next.push({ role: 'assistant', content: partial });
+      }
+      return next;
+    });
+    const tick = setInterval(() => {
+      const p = localStorage.getItem(STREAM_KEY);
+      if (p === null) {
+        // stream selesai — sinkronkan final dari history
+        clearInterval(tick);
+        api.get('/ai/chat/history').then(h => {
+          const history: Message[] = (h.data || []).map((r: any) => ({ role: r.role, content: r.content }));
+          if (history.length > 0) setMessages(history);
+        }).catch(() => {});
+        setStreaming(false);
+        return;
+      }
+      setMessages(prev => {
+        const next = [...prev];
+        next[next.length - 1] = { role: 'assistant', content: p };
+        return next;
+      });
+    }, 400);
+    return () => clearInterval(tick);
+  }, [loaded]);
+
   const handleSend = async () => {
     if (!input.trim() || loading) return;
 
@@ -72,6 +123,9 @@ export default function AICoach() {
       });
 
     try {
+      // Simpan tanda "stream aktif" — kalau user pindah route, komponen lain di route /ai-coach
+      // akan melanjutkan tampilan stream ini dari localStorage.
+      saveStream('');
       const response = await fetch(`${api.defaults.baseURL}/ai/chat`, {
       method: 'POST',
       headers: {
@@ -90,6 +144,7 @@ export default function AICoach() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let full = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -103,13 +158,19 @@ export default function AICoach() {
           if (!evMatch || !dataMatch) continue;
           const ev = evMatch[1].trim();
           const data = JSON.parse(dataMatch[1]);
-          if (ev === 'delta') updateLast(c => c + data.text);
+          if (ev === 'delta') {
+            full += data.text;
+            saveStream(full); // persist segera — tetap hidup walau pindah route
+            updateLast(c => c + data.text);
+          }
           else if (ev === 'error') updateLast(() => `⚠️ ${data.message}`);
         }
       }
+      finishStream(full);
     } catch (error: any) {
       console.error('Failed to chat with AI:', error);
       const msg = error?.message || 'Maaf, saya sedang mengalami gangguan koneksi. Bisa coba lagi nanti?';
+      finishStream('');
       updateLast(c => c ? c : `⚠️ ${msg}`);
     } finally {
       setLoading(false);
@@ -167,6 +228,11 @@ export default function AICoach() {
               AI Coach <Sparkles className="w-5 h-5 text-orange-500 fill-orange-500" />
             </h1>
             <p className="text-sm text-zinc-500 truncate max-w-[280px]" title={currentChatModel}>Model: {currentChatModel}</p>
+          {streaming && (
+            <p className="text-[10px] text-emerald-500 flex items-center gap-1 font-bold uppercase tracking-wider">
+              <Radio className="w-3 h-3 animate-pulse" /> AI sedang menulis… (tetap lanjut walau pindah halaman)
+            </p>
+          )}
           </div>
         </div>
         <div className="flex items-center gap-2">
