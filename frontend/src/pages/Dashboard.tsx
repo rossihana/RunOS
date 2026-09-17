@@ -117,10 +117,34 @@ export default function Dashboard() {
       return res.data;
     },
     onSuccess: (data: any) => {
-      toast.success(data?.message || 'Sync dimulai — data muncul dalam 1-2 menit');
-      // Refetch setelah delay beri waktu Python menyelesaikan sync
-      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['dashboard'] }), 90_000);
-      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['dashboard'] }), 180_000);
+      toast.success(data?.message || 'Sync dimulai — menunggu sampai selesai…');
+      // Polling status sync tiap 5 dtk sampai done/failed (bukan delay tebakan).
+      // Jalur per-user: GET /garmin/status → { status: { status, detail }, connected }
+      let polls = 0;
+      const MAX_POLLS = 60; // 5 menit maksimum
+      const tick = setInterval(async () => {
+        polls++;
+        try {
+          const st = await api.get('/activities/garmin/status');
+          const jobStatus = st.data?.status?.status;
+          if (jobStatus === 'done') {
+            clearInterval(tick);
+            toast.success('✅ Sync selesai — data terbaru dimuat!');
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+          } else if (jobStatus === 'failed') {
+            clearInterval(tick);
+            const detail = String(st.data?.status?.detail || '').slice(-160);
+            toast.error(`Sync gagal: ${detail}`);
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+          } else if (polls >= MAX_POLLS) {
+            clearInterval(tick);
+            toast.error('Sync timeout — cek status di halaman Garmin Sync.');
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+          }
+        } catch {
+          if (polls >= MAX_POLLS) { clearInterval(tick); toast.error('Sync status tak terjangkau.'); }
+        }
+      }, 5000);
     },
     onError: (err: any) => {
       const msg = err?.response?.data?.error || err?.message || 'Sync gagal';
