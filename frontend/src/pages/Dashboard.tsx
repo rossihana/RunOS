@@ -74,6 +74,7 @@ interface Race {
 
 export default function Dashboard() {
   const queryClient = useQueryClient();
+  const [syncing, setSyncing] = useState(false); // tombol Sync loading sampai sync SELESAI (bukan sampai POST balas)
 
   const results = useQueries({
     queries: [
@@ -98,58 +99,61 @@ export default function Dashboard() {
 
   const syncMutation = useMutation({
     mutationFn: async () => {
+      setSyncing(true); // tombol loading mulai DI SINI
+      let usedPerUser = false;
       // S7: kalau Garmin sudah terhubung di akun → jalur per-user (JWT, tanpa secret)
       try {
         const st = await api.get('/activities/garmin/status');
         if (st.data?.connected) {
-          const res = await api.post('/activities/garmin/sync', { days: 14, details: true });
-          return res.data;
+          await api.post('/activities/garmin/sync', { days: 14, details: true });
+          usedPerUser = true;
         }
       } catch { /* fallback ke jalur owner */ }
       // Jalur owner (SYNC_SECRET) — untuk akun pemilik & cron
-      let secret = localStorage.getItem('runos_sync_secret') || '';
-      if (!secret) {
-        secret = prompt('Masukkan Sync Secret (lihat backend/.env SYNC_SECRET):') || '';
-        if (!secret) throw new Error('Sync dibatalkan — secret dibutuhkan');
-        localStorage.setItem('runos_sync_secret', secret);
+      if (!usedPerUser) {
+        let secret = localStorage.getItem('runos_sync_secret') || '';
+        if (!secret) {
+          secret = prompt('Masukkan Sync Secret (lihat backend/.env SYNC_SECRET):') || '';
+          if (!secret) throw new Error('Sync dibatalkan — secret dibutuhkan');
+          localStorage.setItem('runos_sync_secret', secret);
+        }
+        await api.post('/activities/sync', {}, { headers: { 'X-Sync-Secret': secret } });
       }
-      const res = await api.post('/activities/sync', {}, { headers: { 'X-Sync-Secret': secret } });
-      return res.data;
-    },
-    onSuccess: (data: any) => {
-      // Pesan konsisten dgn polling: sync berjalan, spinner muter sampai done/failed
-      toast.success(data?.message || 'Sync dimulai — menunggu sampai selesai…');
-      // Polling status sync tiap 5 dtk sampai done/failed (bukan delay tebakan).
-      // Jalur per-user: GET /garmin/status → { status: { status, detail }, connected }
+
+      // Tombol tetap loading: POLLING status tiap 5 dtk sampai done/failed
+      // (semua di dalam mutationFn — isPending bertahan sampai sync beneran selesai)
       let polls = 0;
       const MAX_POLLS = 60; // 5 menit maksimum
-      const tick = setInterval(async () => {
+      while (polls < MAX_POLLS) {
+        await new Promise(r => setTimeout(r, 5000));
         polls++;
         try {
           const st = await api.get('/activities/garmin/status');
           const jobStatus = st.data?.status?.status;
           if (jobStatus === 'done') {
-            clearInterval(tick);
             toast.success('✅ Sync selesai — data terbaru dimuat!');
             queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-          } else if (jobStatus === 'failed') {
-            clearInterval(tick);
+            return { ok: true };
+          }
+          if (jobStatus === 'failed') {
             const detail = String(st.data?.status?.detail || '').slice(-160);
             toast.error(`Sync gagal: ${detail}`);
             queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-          } else if (polls >= MAX_POLLS) {
-            clearInterval(tick);
-            toast.error('Sync timeout — cek status di halaman Garmin Sync.');
-            queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+            throw new Error('Sync gagal');
           }
-        } catch {
-          if (polls >= MAX_POLLS) { clearInterval(tick); toast.error('Sync status tak terjangkau.'); }
+        } catch (e: any) {
+          if (e?.message === 'Sync gagal') throw e; // error sync asli → onError
+          // status endpoint gagal sesaat → lanjut polling
         }
-      }, 5000);
+      }
+      toast.error('Sync timeout — cek status di halaman Garmin Sync.');
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      return { ok: false, timeout: true };
     },
+    onSettled: () => setSyncing(false), // tombol kembali normal SETELAH semua selesai
     onError: (err: any) => {
       const msg = err?.response?.data?.error || err?.message || 'Sync gagal';
-      toast.error(msg);
+      if (msg !== 'Sync gagal') toast.error(msg); // toast sync-fail sudah dikirim di mutationFn
       if (String(msg).includes('secret')) localStorage.removeItem('runos_sync_secret');
       console.error('Error syncing activities:', err);
     }
@@ -218,13 +222,13 @@ export default function Dashboard() {
           <h1 className="text-3xl font-extrabold text-zinc-900 dark:text-white tracking-tight">Dashboard</h1>
           <p className="text-zinc-500 dark:text-zinc-400 font-medium">Welcome back! Here's your training progress.</p>
         </div>
-        <button 
+        <button
            onClick={handleSync}
-           disabled={syncMutation.isPending}
+           disabled={syncing}
            className="flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white px-6 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-orange-600/20 active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
         >
-          <RefreshCw className={`w-4 h-4 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-          {syncMutation.isPending ? 'Syncing...' : 'Sync & Refresh'}
+          <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+          {syncing ? 'Syncing...' : 'Sync & Refresh'}
         </button>
       </div>
 
