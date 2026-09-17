@@ -117,6 +117,7 @@ export default function Dashboard() {
       return res.data;
     },
     onSuccess: (data: any) => {
+      // Pesan konsisten dgn polling: sync berjalan, spinner muter sampai done/failed
       toast.success(data?.message || 'Sync dimulai — menunggu sampai selesai…');
       // Polling status sync tiap 5 dtk sampai done/failed (bukan delay tebakan).
       // Jalur per-user: GET /garmin/status → { status: { status, detail }, connected }

@@ -186,7 +186,7 @@ router.post('/garmin/sync', authenticate, catchAsync(async (req: AuthRequest, re
   }
   const { days, details } = req.body || {};
   m.queueSync(userId, days ? Number(days) : undefined, Boolean(details));
-  res.json({ success: true, message: 'Sync Garmin dimulai di background (antrean).' });
+  res.json({ success: true, message: 'Sync Garmin dimulai — menunggu sampai selesai…' });
 }));
 
 router.get('/garmin/status', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
