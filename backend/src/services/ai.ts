@@ -57,8 +57,9 @@ export async function getAISettings(userId: number): Promise<AISettings> {
   const r = await import('../db.js');
   const res = await r.query('SELECT email, ai_settings FROM users WHERE id = $1', [userId]);
   const s: AISettings = res.rows[0]?.ai_settings || {};
+  const isOwner = OWNER_EMAILS.includes(String(res.rows[0]?.email || '').toLowerCase());
   // Sanitasi S2: setting lama (pra-enforcement) yang melanggar katalog free dibuang saat runtime
-  if (!OWNER_EMAILS.includes(String(res.rows[0]?.email || '').toLowerCase())) {
+  if (!isOwner) {
     if (s.defaultModel && !FREE_MODELS.includes(s.defaultModel) && !s.customProviders?.[s.defaultModel.split(':')[0]]) {
       s.defaultModel = null;
     }
@@ -68,6 +69,8 @@ export async function getAISettings(userId: number): Promise<AISettings> {
         delete s.features![k];
       }
     }
+    // Non-owner tanpa pilihan model: pakai free default (BUKAN DEFAULT_MODEL premium)
+    if (!s.defaultModel) s.defaultModel = FREE_DEFAULT_MODEL;
   }
   return s;
 }
