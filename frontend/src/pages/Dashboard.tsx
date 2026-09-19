@@ -225,7 +225,7 @@ export default function Dashboard() {
         <button
            onClick={handleSync}
            disabled={syncing}
-           className="flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white px-6 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-orange-600/20 active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
+           className="flex items-center justify-center gap-2 bg-orange-700 hover:bg-orange-800 text-white px-6 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-orange-700/20 active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
         >
           <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
           {syncing ? 'Syncing...' : 'Sync & Refresh'}
@@ -268,9 +268,9 @@ export default function Dashboard() {
             </div>
 
             {stat.trend !== undefined && (
-              <div className={`mt-4 inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full ${stat.trend >= 0 ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10' : 'text-red-500 bg-red-50 dark:bg-red-500/10'}`}>
+              <div className={`mt-4 inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full ${stat.trend >= 0 ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10' : 'text-red-500 bg-red-100 dark:bg-red-500/25'}`}>
                 {stat.trend >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingUp className="w-3.5 h-3.5 rotate-180" />}
-                {Math.abs(stat.trend)}% <span className="opacity-60 font-medium">vs last {stat.label.includes('Weekly') ? 'week' : 'month'}</span>
+                {Math.abs(stat.trend)}% <span className="opacity-90 font-medium">vs last {stat.label.includes('Weekly') ? 'week' : 'month'}</span>
               </div>
             )}
           </motion.div>
@@ -297,7 +297,7 @@ export default function Dashboard() {
                         </div>
                         <div>
                           <div className="text-xs font-bold text-orange-500 uppercase tracking-widest mb-1">Upcoming Race</div>
-                          <h3 className="text-2xl font-black text-white">{race.race_name}</h3>
+                          <h2 className="text-2xl font-black text-white">{race.race_name}</h2>
                           <div className="flex items-center gap-4 mt-1 text-zinc-400 font-medium">
                             <span className="flex items-center gap-1.5"><Calendar className="w-4 h-4" /> {format(new Date(race.race_date), 'MMMM d, yyyy')}</span>
                             <span className="flex items-center gap-1.5"><Activity className="w-4 h-4" /> {race.distance} km</span>
@@ -307,11 +307,11 @@ export default function Dashboard() {
 
                       <div className="flex flex-wrap items-center gap-4">
                         <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl px-5 py-3">
-                          <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-0.5">Target Time</div>
+                          <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">Target Time</div>
                           <div className="text-lg font-black text-white">{race.target_time}</div>
                         </div>
                         <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl px-5 py-3">
-                          <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-0.5">Target Pace</div>
+                          <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">Target Pace</div>
                           <div className="text-lg font-black text-white">{race.target_pace || 'N/A'}</div>
                         </div>
                       </div>

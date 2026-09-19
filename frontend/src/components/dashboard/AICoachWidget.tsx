@@ -90,7 +90,7 @@ export default function AICoachWidget() {
               <p className="text-xs text-zinc-400 font-medium">Analytic • Supportive</p>
             </div>
           </div>
-          <Link to="/ai-coach" className="text-zinc-400 hover:text-white transition-colors p-2 bg-zinc-800 rounded-lg">
+          <Link to="/ai-coach" aria-label="AI Coach" className="text-zinc-400 hover:text-white transition-colors p-2 bg-zinc-800 rounded-lg">
             <MessageSquare className="w-4 h-4" />
           </Link>
         </div>

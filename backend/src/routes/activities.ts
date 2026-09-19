@@ -6,15 +6,18 @@ import { catchAsync } from '../utils/catchAsync.js';
 const router = Router();
 
 router.get('/', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  // ponytail: list endpoint strips map_polyline (heavy); detail page fetches it via /:id
+  const limit = Math.min(Number(req.query.limit) || 200, 200);
   const result = await query(
     `SELECT 
       id, garmin_activity_id, name, distance, moving_time, elapsed_time,
       average_speed, average_pace, max_speed, average_heartrate, max_heartrate,
-      elevation_gain, start_date, start_date_local, map_polyline, details_fetched
+      elevation_gain, start_date, start_date_local, details_fetched
      FROM activities 
      WHERE user_id = $1 
-     ORDER BY start_date DESC`,
-    [req.user?.id]
+     ORDER BY start_date DESC
+     LIMIT $2`,
+    [req.user?.id, limit]
   );
   res.json(result.rows);
 }));

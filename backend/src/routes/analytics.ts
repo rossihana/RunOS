@@ -338,23 +338,27 @@ router.get('/recent-trend', authenticate, catchAsync(async (req: AuthRequest, re
     elevation: Math.round(Number(thisWeekRes.rows[0].elevation) || 0)
   };
 
-  // 2. Past 12 Weeks Trend
-  // We want 12 data points, each representing a week (Monday-Sunday)
+  // 2. Past 12 Weeks Trend — one GROUP BY query instead of 12 sequential queries
+  const trendRes = await query(
+    `SELECT date_trunc('week', COALESCE(start_date_local::date, start_date::date))::date AS wk,
+            SUM(distance) AS distance
+     FROM activities
+     WHERE user_id = $1
+       AND COALESCE(start_date_local::date, start_date::date) >= $2
+       AND COALESCE(start_date_local::date, start_date::date) < $3
+     GROUP BY 1`,
+    [userId, format(startOfWeek(subWeeks(now, 11), { weekStartsOn: 1 }), 'yyyy-MM-dd'), format(endOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd')]
+  );
+  const byWeek = new Map(trendRes.rows.map(r => [Number(r.wk), Number(r.distance) || 0]));
+
   const trendData = [];
   let maxDistance = 0;
 
   for (let i = 11; i >= 0; i--) {
-    const targetDate = subWeeks(now, i);
-    const ws = startOfWeek(targetDate, { weekStartsOn: 1 });
-    const we = endOfWeek(targetDate, { weekStartsOn: 1 });
-    
-    const weekRes = await query(
-      `SELECT SUM(distance) as distance FROM activities
-       WHERE user_id = $1 AND COALESCE(start_date_local::date, start_date::date) >= $2 AND COALESCE(start_date_local::date, start_date::date) <= $3`,
-      [userId, format(ws, 'yyyy-MM-dd'), format(we, 'yyyy-MM-dd')]
-    );
+    const ws = startOfWeek(subWeeks(now, i), { weekStartsOn: 1 });
+    const we = endOfWeek(now, { weekStartsOn: 1 });
 
-    const distanceKm = (Number(weekRes.rows[0].distance) || 0) / 1000;
+    const distanceKm = (byWeek.get(Number(ws)) || 0) / 1000;
     if (distanceKm > maxDistance) maxDistance = distanceKm;
 
     trendData.push({

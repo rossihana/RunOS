@@ -90,8 +90,9 @@ export default function Layout() {
             </div>
           )}
           
-          <button 
+          <button
             onClick={toggleSidebar}
+            aria-label={isSidebarCollapsed ? 'Buka sidebar' : 'Tutup sidebar'}
             className={`
               p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors
               ${isSidebarCollapsed ? 'absolute -right-3 top-20 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-md' : ''}
@@ -131,6 +132,7 @@ export default function Layout() {
           </div>
           <button
             onClick={handleLogout}
+            aria-label="Sign out"
             title={isSidebarCollapsed ? 'Sign out' : undefined}
             className={`
               flex items-center w-full ${isSidebarCollapsed ? 'justify-center h-11 w-11' : 'px-3 py-2.5'} text-sm font-medium text-zinc-600 dark:text-zinc-400 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-red-600 dark:hover:text-red-500 transition-colors
@@ -151,6 +153,7 @@ export default function Layout() {
             <ThemeToggle />
             <button
               onClick={handleLogout}
+              aria-label="Sign out"
               className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-red-600 dark:hover:text-red-500 transition-colors"
             >
               <LogOut className="h-5 w-5" />
