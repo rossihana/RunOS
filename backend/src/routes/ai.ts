@@ -17,6 +17,7 @@ import {
   DEFAULT_MODEL,
   FREE_MODELS,
   FREE_DEFAULT_MODEL,
+  FREE_HOSTED_PREFIXES,
   OWNER_EMAILS,
   AIResponseError,
   AI_COACH_SYSTEM_PROMPT,
@@ -50,6 +51,22 @@ const MODEL_RE = /^[a-zA-Z0-9._\-\/:]{1,150}$/;
 const PROVIDER_NAME_RE = /^[a-zA-Z0-9_-]{1,30}$/;
 const AI_FEATURES = ['chat', 'dashboard', 'activity', 'prediction', 'plan', 'merge'] as const;
 
+function isSafeProviderUrl(rawUrl: string): boolean {
+  try {
+    const u = new URL(rawUrl);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return false;
+    if (host === '127.0.0.1' || host === '::1' || host.startsWith('127.')) return false;
+    if (host === '169.254.169.254') return false; // link-local / cloud metadata
+    if (host.startsWith('10.') || host.startsWith('192.168.')) return false;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ─── S2: user biasa hanya boleh model GRATIS + provider sendiri (BYOK).
 // Owner (OWNER_EMAILS) bebas pakai semua model di 9router (termasuk glm-5.3-flash).
 async function emailOf(userId: number): Promise<string> {
@@ -61,7 +78,11 @@ function isOwner(email: string): boolean {
 }
 function modelAllowed(email: string, model: string, hasCustomProvider: boolean): boolean {
   if (isOwner(email)) return true;
-  if (model.includes(':')) return hasCustomProvider; // BYOK: provider harus milik user
+  if (model.includes(':')) {
+    // Hosted free tier (openrouter/...:free via 9router pemilik) tetap boleh untuk non-owner
+    if (FREE_HOSTED_PREFIXES.some(p => model.startsWith(p))) return true;
+    return hasCustomProvider; // BYOK: provider harus milik user
+  }
   return FREE_MODELS.includes(model);
 }
 async function assertModelsAllowed(userId: number, models: (string | null | undefined)[]): Promise<string | null> {
@@ -154,8 +175,8 @@ router.put('/providers', authenticate, catchAsync(async (req: AuthRequest, res: 
   if (typeof name !== 'string' || !PROVIDER_NAME_RE.test(name)) {
     return res.status(400).json({ error: 'Nama provider tidak valid (huruf/angka/-/_ , maks 30)' });
   }
-  if (typeof baseUrl !== 'string' || !/^https?:\/\/.+/.test(baseUrl) || baseUrl.length > 300) {
-    return res.status(400).json({ error: 'Base URL tidak valid (harus http/https)' });
+  if (typeof baseUrl !== 'string' || !isSafeProviderUrl(baseUrl) || baseUrl.length > 300) {
+    return res.status(400).json({ error: 'Base URL tidak valid atau mengarah ke alamat internal/privat' });
   }
   if (typeof apiKey !== 'string' || apiKey.length < 8 || apiKey.length > 300) {
     return res.status(400).json({ error: 'API key tidak valid' });
@@ -655,11 +676,28 @@ router.post('/race-prediction/:id', authenticate, RL.prediction, aiIdempotency('
      ORDER BY start_date DESC`, [req.user?.id]);
   const lab = await query('SELECT lab_config FROM users WHERE id = $1', [req.user?.id]);
   const vo2max = estimateVO2Max(acts.rows, lab.rows[0]?.lab_config?.maxHr);
+  // Jangkar: prediksi resmi Garmin (health_daily) kalau ada, fallback rumus VO2max
+  let vo2maxAnchor = vo2max;
+  let baseline: Array<{ name: string; distance: number; time: number }> | null = null;
+  try {
+    const g = await query('SELECT vo2max_garmin, pred_5k_s, pred_10k_s, pred_hm_s, pred_fm_s FROM health_daily WHERE user_id = $1 ORDER BY date DESC LIMIT 1', [req.user?.id]);
+    if (g.rows[0]?.vo2max_garmin) vo2maxAnchor = g.rows[0].vo2max_garmin;
+    const p = g.rows[0];
+    if (p?.pred_5k_s) {
+      baseline = [
+        { name: '5K', distance: 5000, time: p.pred_5k_s },
+        { name: '10K', distance: 10000, time: p.pred_10k_s },
+        { name: 'Half Marathon', distance: 21097, time: p.pred_hm_s },
+        { name: 'Marathon', distance: 42195, time: p.pred_fm_s },
+      ].filter(x => x.time != null);
+    }
+  } catch (_) { /* tabel belum ada */ }
   const { predictRaceTimes } = await import('../services/analytics.js');
-  const baseline = predictRaceTimes(vo2max);
+  if (!baseline) baseline = predictRaceTimes(vo2maxAnchor);
+  const baselineSource = baseline === predictRaceTimes(vo2maxAnchor) ? 'formula VO2max' : 'prediksi resmi Garmin';
 
   const contextStr = await getFullUserContext(req.user?.id!);
-  const raceContext = `Target Race: ${race.race_name}\nDistance: ${race.distance} km\nTarget Time: ${race.target_time}\n\nBaseline prediksi dari formula VO2max (${vo2max?.toFixed?.(1) ?? vo2max}): ${JSON.stringify(baseline)}\nGunakan baseline ini sebagai jangkar — kalau analisis kamu berbeda jauh, jelaskan kenapa.\n\nPast Activity Data:\n${contextStr}`;
+  const raceContext = `Target Race: ${race.race_name}\nDistance: ${race.distance} km\nTarget Time: ${race.target_time}\n\nBaseline prediksi dari ${baselineSource} (${vo2maxAnchor?.toFixed?.(1) ?? vo2maxAnchor}): ${JSON.stringify(baseline)}\nGunakan baseline ini sebagai jangkar — kalau analisis kamu berbeda jauh, jelaskan kenapa.\n\nPast Activity Data:\n${contextStr}`;
   
   const prompt = `Minta prediksi realistis untuk race saya berdasarkan data aktivitas ini.`;
   const prediction = await generateAIJson(prompt, raceContext, RACE_PREDICTION_SYSTEM_PROMPT, model,

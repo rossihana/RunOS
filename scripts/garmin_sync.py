@@ -75,8 +75,8 @@ def map_summary(a):
         a.get("averageHR"),
         a.get("maxHR"),
         a.get("elevationGain"),
-        # Garmin SPM = langkah satu kaki/menit; skema RunOS memakai full cadence (dua kaki)
-        round(cadence * 2) if cadence else None,
+        # averageRunningCadenceInStepsPerMinute sudah spm dua kaki (dicek: 145-187) — jangan ×2
+        round(cadence) if cadence else None,
         start_gmt,
         a.get("startTimeLocal"),
     )
@@ -139,7 +139,10 @@ def streams_to_dict(details):
         latlng = [[p.get("lat"), p.get("lon")] for p in poly
                   if isinstance(p, dict) and p.get("lat") is not None and p.get("lon") is not None]
 
-    cadence = col("directDoubleCadence") or col("directRunCadence")
+    # directDoubleCadence = spm dua kaki (verified 177); directRunCadence = per-kaki (88) → ×2
+    cadence = col("directDoubleCadence")
+    if not cadence and col("directRunCadence"):
+        cadence = [v * 2 if v is not None else None for v in col("directRunCadence")]
     streams = {
         "latlng": {"data": latlng} if latlng else None,
         "distance": {"data": col("sumDistance")} if col("sumDistance") else None,
@@ -374,6 +377,109 @@ def get_user_id(conn, explicit=None):
         raise SystemExit("❌ Belum ada user di tabel users — daftar dulu via aplikasi RunOS.")
     return row[0]
 
+# ─── Health daily (HRV/sleep/readiness/training-status/VO2max) ───
+
+HEALTH_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS health_daily (
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  date DATE NOT NULL,
+  hrv_ms FLOAT,
+  sleep_score FLOAT,
+  readiness_score FLOAT,
+  training_status TEXT,
+  vo2max_garmin FLOAT,
+  raw JSONB,
+  PRIMARY KEY (user_id, date)
+);
+ALTER TABLE health_daily ADD COLUMN IF NOT EXISTS rhr FLOAT;
+ALTER TABLE health_daily ADD COLUMN IF NOT EXISTS pred_5k_s INT;
+ALTER TABLE health_daily ADD COLUMN IF NOT EXISTS pred_10k_s INT;
+ALTER TABLE health_daily ADD COLUMN IF NOT EXISTS pred_hm_s INT;
+ALTER TABLE health_daily ADD COLUMN IF NOT EXISTS pred_fm_s INT;
+"""
+
+HEALTH_UPSERT_SQL = """
+INSERT INTO health_daily (user_id, date, hrv_ms, sleep_score, readiness_score, training_status, vo2max_garmin, rhr, pred_5k_s, pred_10k_s, pred_hm_s, pred_fm_s, raw)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (user_id, date) DO UPDATE SET
+  hrv_ms = EXCLUDED.hrv_ms, sleep_score = EXCLUDED.sleep_score,
+  readiness_score = EXCLUDED.readiness_score, training_status = EXCLUDED.training_status,
+  vo2max_garmin = COALESCE(EXCLUDED.vo2max_garmin, health_daily.vo2max_garmin),
+  rhr = EXCLUDED.rhr,
+  pred_5k_s = COALESCE(EXCLUDED.pred_5k_s, health_daily.pred_5k_s),
+  pred_10k_s = COALESCE(EXCLUDED.pred_10k_s, health_daily.pred_10k_s),
+  pred_hm_s = COALESCE(EXCLUDED.pred_hm_s, health_daily.pred_hm_s),
+  pred_fm_s = COALESCE(EXCLUDED.pred_fm_s, health_daily.pred_fm_s),
+  raw = EXCLUDED.raw;
+"""
+
+def sync_health(conn, user_id, c, days):
+    """Sync data health harian -> health_daily. Client c sudah login & conn milik main (jangan ditutup di sini)."""
+    import datetime
+    cur = conn.cursor()
+    cur.execute(HEALTH_TABLE_SQL)
+    conn.commit()
+
+    n = 0
+    # Race predictor Garmin (per-hari) — sekali fetch untuk seluruh jendela sync.
+    # ponytail: API daily cap ~30 hari; window lebih panjang → hari tua dapat NULL, upgrade: chunk per 30 hari.
+    today = datetime.date.today()
+    preds_by_date = {}
+    try:
+        start_d = today - datetime.timedelta(days=days - 1)
+        for pr in (c.get_race_predictions(start_d.isoformat(), today.isoformat(), _type='daily') or []):
+            preds_by_date[pr.get('calendarDate')] = pr
+        print(f"📈 Race predictor Garmin: {len(preds_by_date)} hari")
+    except Exception as e:
+        print(f"   ✗ race predictions: {type(e).__name__}: {str(e)[:120]}")
+
+    for i in range(days):
+        d = (datetime.date.today() - datetime.timedelta(days=i)).isoformat()
+        try:
+            hrv = c.get_hrv_data(d) or {}
+            hrv_sum = hrv.get("hrvSummary") or {}
+            hrv_val = hrv_sum.get("lastNightAvg")
+            sleep = c.get_sleep_data(d) or {}
+            sleep_val = ((sleep.get("dailySleepDTO") or {}).get("sleepTimeSeconds") or 0) / 3600.0
+            sleep_score_val = (sleep.get("dailySleepDTO") or {}).get("sleepScores", {}).get("overall", {}).get("value")
+            rhr_val = None
+            try:
+                rhr_raw = c.get_rhr_day(d) or {}
+                rhr_val = ((rhr_raw.get("allMetrics") or {}).get("metricsMap") or {}).get("WELLNESS_RESTING_HEART_RATE", [{}])[0].get("value")
+            except Exception:
+                pass
+            # VO2max resmi harian (max-metrics) — persis angka yang ditampilkan jam; None → jangan timpa (COALESCE di upsert)
+            vo2_val = None
+            try:
+                mm = c.get_max_metrics(d) or []
+                g = (mm[0].get("generic") if mm and isinstance(mm[0], dict) else None) or {}
+                vo2_val = g.get("vo2MaxValue")
+            except Exception:
+                pass
+            # Stress FirstBeat (avgStressLevel resmi Garmin) — disimpan di raw, dibaca saat hitung readiness
+            stress_val = None
+            try:
+                stress_val = (c.get_stress_data(d) or {}).get("avgStressLevel")
+            except Exception:
+                pass
+
+            pr = preds_by_date.get(d) or {}
+            cur.execute(HEALTH_UPSERT_SQL, (
+                user_id, d, hrv_val, sleep_score_val, None, None, vo2_val, rhr_val,
+                pr.get('time5K'), pr.get('time10K'), pr.get('timeHalfMarathon'), pr.get('timeMarathon'),
+                json.dumps({"hrv": hrv, "sleep": sleep, "vo2max": vo2_val, "stress": stress_val}),
+            ))
+            conn.commit()
+            n += 1
+            time.sleep(1.0)  # jangan banting Garmin Connect (429)
+        except Exception as e:
+            conn.rollback()
+            print(f"   ✗ {d}: {type(e).__name__}: {str(e)[:120]}")
+
+    cur.close()
+    print(f"❤️  {n}/{days} hari health tersimpan (user_id={user_id})")
+    return n
+
 # ─── Main ───
 
 def main():
@@ -382,9 +488,13 @@ def main():
     ap.add_argument("--details", action="store_true", help="ambil splits/polyline/streams per aktivitas")
     ap.add_argument("--max-detail", type=int, default=25, help="batas fetch detail per run (default 25)")
     ap.add_argument("--best-efforts", action="store_true", help="hitung ulang best efforts dari splits (tanpa akses Garmin)")
+    ap.add_argument("--health", action="store_true", help="ambil HRV/sleep/VO2max/stress/prediksi Garmin (jendela auto: 30 jika kosong, 7 jika fresh)")
+    ap.add_argument("--health-days", type=int, default=None, help="paksa jendela sync health N hari (default: auto)")
     ap.add_argument("--verify-only", action="store_true", help="BUG-6: cek kredensial login valid, tanpa sync (dipakai saat connect)")
     ap.add_argument("--user-id", type=int, default=None, help="bind data ke user_id eksplisit (default: user dengan aktivitas terbanyak)")
     args = ap.parse_args()
+    # Clamp hari di batas CLI (defense-in-depth terhadap parameter tak terbatas; lihat clampDays TS)
+    args.days = max(1, min(int(args.days), 365))
 
     if args.verify_only:
         from garminconnect import Garmin
@@ -415,6 +525,28 @@ def main():
     except Exception:
         pass
     print("✅ Login Garmin ok")
+
+    # --health jalan dulu dengan login yang sama; kalau ada --days/--details → lanjut sync aktivitas
+    if args.health:
+        hd = args.health_days
+        if not hd:
+            # Jendela auto (refresh ringan): belum pernah sync → 30; fresh → 7; basi → menyusul max 30
+            import datetime as _dt
+            cur0 = conn.cursor()
+            cur0.execute("SELECT MAX(date) FROM health_daily WHERE user_id = %s", (user_id,))
+            last = cur0.fetchone()[0]
+            cur0.close()
+            if last is None:
+                hd = 30
+            else:
+                gap = (_dt.date.today() - last).days + 1
+                hd = min(30, max(7, gap))
+        n = sync_health(conn, user_id, c, hd)
+        print(f"❤️  Health daily diperbarui: {n} hari (jendela {hd}, user_id={user_id})")
+        if not (args.days or args.details):
+            conn.close()
+            print("✅ Selesai")
+            return
 
     # Kumpulkan semua run (paginasi, garminconnect max 1000/page)
     runs, start = [], 0

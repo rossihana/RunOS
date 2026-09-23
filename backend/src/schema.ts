@@ -4,7 +4,7 @@ export const users = pgTable('users', {
   id: serial('id').primaryKey(),
   email: text('email').unique(),
   passwordHash: text('password_hash'),
-  stravaAthleteId: bigint('strava_athlete_id', { mode: 'bigint' }),
+  garminAthleteId: bigint('garmin_athlete_id', { mode: 'bigint' }),
   firstName: text('first_name'),
   lastName: text('last_name'),
   profilePicture: text('profile_picture'),

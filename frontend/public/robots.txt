@@ -1,0 +1,12 @@
+User-agent: *
+Disallow: /activities
+Disallow: /races
+Disallow: /training
+Disallow: /lab
+Disallow: /ai-coach
+Disallow: /ai-settings
+Disallow: /garmin
+Allow: /
+Allow: /login
+Allow: /terms
+Allow: /privacy

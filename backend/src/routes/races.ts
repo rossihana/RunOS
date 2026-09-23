@@ -47,6 +47,11 @@ router.post('/:id/link-activity', authenticate, catchAsync(async (req: AuthReque
     return res.status(400).json({ error: 'Missing activity_id' });
   }
 
+  const actCheck = await query('SELECT id FROM activities WHERE id = $1 AND user_id = $2', [activity_id, req.user?.id]);
+  if (actCheck.rows.length === 0) {
+    return res.status(404).json({ error: 'Aktivitas tidak ditemukan atau bukan milik Anda' });
+  }
+
   const result = await query(`
     UPDATE races
     SET linked_activity_id = $1

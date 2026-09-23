@@ -13,14 +13,20 @@ import { globalErrorHandler } from './src/middleware/error.js';
 
 const app = express();
 
-// CORS — allow all origins (data is protected by JWT auth, not by CORS)
-// origin: true echoes back the requesting origin, required for credentials: true
+// CORS allowlist (perbaikan pasca pentest 23-09): origin liar tidak lagi mendapat header CORS.
+// Auth tetap JWT via localStorage (bukan cookie); credentials hanya berlaku utk origin terizinkan.
+// ponytail: daftar via env CORS_ORIGINS (dipasah koma); domain baru = edit env, bukan kode.
+const corsAllowed = (process.env.CORS_ORIGINS ?? 'http://localhost:5173,http://localhost:3001')
+  .split(',').map(s => s.trim()).filter(Boolean);
 app.use(cors({
-  origin: true,
+  origin: (origin, cb) => cb(null, !origin || corsAllowed.includes(origin)),
   credentials: true,
 }));
 
-app.set('trust proxy', 1);
+// Trust proxy HANYA di belakang proxy tepercaya. Pentest 23-09: trust proxy=1 membuat rate-limit
+// login bisa dibobol X-Forwarded-For saat backend diakses langsung (req.ip ikut header klien).
+// ponytail: set TRUST_PROXY=1 saat deploy di belakang reverse proxy (nginx/Cloudflare).
+app.set('trust proxy', process.env.TRUST_PROXY === '1' ? 1 : false);
 app.use(express.json());
 app.use(cookieParser());
 

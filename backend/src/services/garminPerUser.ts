@@ -75,14 +75,23 @@ function runPython(userId: number, args: string[], env: Record<string, string>) 
   });
 }
 
-/** Entri utama: jalankan sync untuk satu user (diantrekan global). */
-export function queueSync(userId: number, days?: number, details = false): void {
-  if (!queue.includes(userId)) queue.push(userId);
-  lastByUser.set(userId, { userId, startedAt: new Date().toISOString(), status: 'running' });
-  processQueue(days, details);
+/** Clamp days ke [1, 365] di batas service. ponytail: ceiling 365; naikkan kalau perlu full-history sync. */
+export function clampDays(d?: number): number | undefined {
+  if (d == null) return undefined;
+  const n = Number(d);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.max(1, Math.min(365, Math.floor(n)));
 }
 
-function processQueue(defaultDays?: number, defaultDetails = false): void {
+/** Entri utama: jalankan sync untuk satu user (diantrekan global). */
+export function queueSync(userId: number, days?: number, details = false, health = false): void {
+  days = clampDays(days);
+  if (!queue.includes(userId)) queue.push(userId);
+  lastByUser.set(userId, { userId, startedAt: new Date().toISOString(), status: 'running' });
+  processQueue(days, details, health);
+}
+
+function processQueue(defaultDays?: number, defaultDetails = false, defaultHealth = false): void {
   if (processing) return;
   const userId = queue.shift();
   if (!userId) return;
@@ -93,9 +102,10 @@ function processQueue(defaultDays?: number, defaultDetails = false): void {
       lastByUser.set(userId, { userId, startedAt: new Date().toISOString(), status: 'failed', detail: 'Kredensial Garmin belum dihubungkan' });
       return;
     }
-    const args: string[] = [];
+    const args: string[] = ['--user-id', String(userId)];
     if (defaultDays) args.push('--days', String(defaultDays));
     if (defaultDetails) args.push('--details', '--max-detail', '30');
+    if (defaultHealth) args.push('--health');
     const tokenDir = `${LOG_DIR}/tokens/${userId}`;
     fs.mkdirSync(tokenDir, { recursive: true });
     await runPython(userId, args, {
@@ -109,7 +119,7 @@ function processQueue(defaultDays?: number, defaultDetails = false): void {
     })
     .finally(() => {
       processing = false;
-      if (queue.length) processQueue(defaultDays, defaultDetails);
+      if (queue.length) processQueue(defaultDays, defaultDetails, defaultHealth);
     });
 }
 
@@ -118,9 +128,9 @@ export function syncStatusFor(userId: number): SyncJob | null {
 }
 
 /** Cron: antrekan sync untuk SEMUA user yang terhubung (jalankan via /activities/cron-sync-all + SYNC_SECRET). */
-export async function queueAllConnected(days?: number, details = false): Promise<number> {
+export async function queueAllConnected(days?: number, details = false, health = false): Promise<number> {
   const r = await query('SELECT id FROM users WHERE garmin_email IS NOT NULL');
-  for (const row of r.rows) queueSync(row.id, days, details);
+  for (const row of r.rows) queueSync(row.id, days, details, health);
   return r.rows.length;
 }
 

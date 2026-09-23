@@ -1,4 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Activity, LayoutDashboard, Flag, LogOut, Menu, Sparkles, ClipboardList, FlaskConical, Cpu, Watch, MailWarning } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -44,13 +45,17 @@ export default function Layout() {
     localStorage.setItem('sidebar_collapsed', String(newState));
   };
 
+  const queryClient = useQueryClient();
+
   const handleLogout = async () => {
     try {
       await api.post('/auth/logout');
-      localStorage.removeItem('token');
-      window.location.href = '/login';
     } catch (error) {
       console.error('Logout failed', error);
+    } finally {
+      queryClient.clear();
+      localStorage.removeItem('token');
+      window.location.replace('/login');
     }
   };
 

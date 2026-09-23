@@ -273,16 +273,20 @@ export function calculateBiomechanicalTrend(activities: ActivityData[]) {
   const twelveWeeksAgo = new Date(today);
   twelveWeeksAgo.setDate(twelveWeeksAgo.getDate() - 84);
   const recentActs = activities.filter(a => parseLocalDate(a.start_date) >= twelveWeeksAgo && a.cadence && a.average_speed);
-  
+
+  // Fix cadence: Garmin simpan per-kaki x2 di sebagian data — nilai >220 dibagi 2
+  const normCadence = (c: number) => (c > 220 ? c / 2 : c);
+
   const weeklyMech = new Map<string, { totalCadence: number, totalStride: number, count: number }>();
   recentActs.forEach(act => {
     const d = parseLocalDate(act.start_date);
     const diff = d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1);
     const monday = formatLocalDate(new Date(d.setDate(diff)));
-    
-    const stride = act.average_speed! / (act.cadence! / 60);
+
+    const cad = normCadence(act.cadence!);
+    const stride = act.average_speed! / (cad / 60);
     const entry = weeklyMech.get(monday) || { totalCadence: 0, totalStride: 0, count: 0 };
-    entry.totalCadence += act.cadence!;
+    entry.totalCadence += cad;
     entry.totalStride += stride;
     entry.count += 1;
     weeklyMech.set(monday, entry);

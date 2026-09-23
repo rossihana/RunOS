@@ -465,6 +465,25 @@ export default function Races() {
                   <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                     Distance (km)
                   </label>
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {[
+                      { v: '5', l: '5K' }, { v: '10', l: '10K' }, { v: '15', l: '15K' },
+                      { v: '21.0975', l: 'HM' }, { v: '30', l: '30K' }, { v: '42.195', l: 'FM' },
+                    ].map(opt => (
+                      <button
+                        key={opt.v}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, distance: opt.v })}
+                        className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border transition-colors ${
+                          formData.distance === opt.v
+                            ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white'
+                            : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white border-zinc-200 dark:border-zinc-700'
+                        }`}
+                      >
+                        {opt.l}
+                      </button>
+                    ))}
+                  </div>
                   <input
                     type="number"
                     step="0.01"
@@ -507,6 +526,32 @@ export default function Races() {
                     className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white focus:border-transparent transition-colors"
                     placeholder="hh:mm:ss"
                   />
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {((): { l: string; t: string }[] => {
+                      const d = parseFloat(formData.distance);
+                      // ponytail: preset statis per jarak umum — custom distance tidak punya chip (tetap bisa ketik manual)
+                      if (d === 5) return [{ l: 'Sub 20', t: '0:20:00' }, { l: 'Sub 25', t: '0:25:00' }, { l: 'Sub 30', t: '0:30:00' }, { l: 'Sub 35', t: '0:35:00' }];
+                      if (d === 10) return [{ l: 'Sub 40', t: '0:40:00' }, { l: 'Sub 45', t: '0:45:00' }, { l: 'Sub 50', t: '0:50:00' }, { l: 'Sub 55', t: '0:55:00' }, { l: 'Sub 60', t: '1:00:00' }];
+                      if (d === 15) return [{ l: 'Sub 1:15', t: '1:15:00' }, { l: 'Sub 1:20', t: '1:20:00' }, { l: 'Sub 1:30', t: '1:30:00' }];
+                      if (d === 21.0975) return [{ l: 'Sub 1:30', t: '1:30:00' }, { l: 'Sub 1:45', t: '1:45:00' }, { l: 'Sub 2:00', t: '2:00:00' }, { l: 'Sub 2:15', t: '2:15:00' }];
+                      if (d === 30) return [{ l: 'Sub 2:30', t: '2:30:00' }, { l: 'Sub 3:00', t: '3:00:00' }, { l: 'Sub 3:30', t: '3:30:00' }];
+                      if (d === 42.195) return [{ l: 'Sub 3:30', t: '3:30:00' }, { l: 'Sub 4:00', t: '4:00:00' }, { l: 'Sub 4:30', t: '4:30:00' }, { l: 'Sub 5:00', t: '5:00:00' }];
+                      return [];
+                    })().map(opt => (
+                      <button
+                        key={opt.t}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, target_time: opt.t })}
+                        className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border transition-colors ${
+                          formData.target_time === opt.t
+                            ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white'
+                            : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white border-zinc-200 dark:border-zinc-700'
+                        }`}
+                      >
+                        {opt.l}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
@@ -822,6 +867,11 @@ export default function Races() {
                 {dateFilter ? `${filteredActivities.length} run` : `${activities.length} run`}
               </span>
             </div>
+            {dateFilter && (
+              <div className="mt-1.5 text-[10px] text-orange-600 dark:text-orange-400">
+                Filter aktif: {new Date(dateFilter + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })} — hasil diperbarui otomatis
+              </div>
+            )}
           </div>
           
           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">

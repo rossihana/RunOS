@@ -8,7 +8,7 @@ import { catchAsync } from '../utils/catchAsync.js';
 import { hashPassword, verifyPassword } from '../services/password.js';
 import { createResetToken, resetPassword } from '../services/passwordReset.js';
 import { sendVerificationEmail, verifyEmailToken, sendResetEmail } from '../services/emailTokens.js';
-import { loginRateLimit, loginAttemptFailed, loginAttemptSucceeded } from '../middleware/rateLimit.js';
+import { loginRateLimit, loginAttemptFailed, loginAttemptSucceeded, forgotPasswordRateLimit } from '../middleware/rateLimit.js';
 
 const router = Router();
 const JWT_SECRET = env.JWT_SECRET;
@@ -94,10 +94,10 @@ router.post('/login', loginRateLimit, catchAsync(async (req: Request, res: Respo
   );
   const user = result.rows[0];
   if (!user || !verifyPassword(password, user.password_hash)) {
-    loginAttemptFailed(req); // hitung hanya attempt GAGAL
+    loginAttemptFailed(req, cleanEmail); // hitung hanya attempt GAGAL
     return res.status(401).json({ error: 'Email atau password salah' });
   }
-  loginAttemptSucceeded(req); // reset hitungan gagal untuk IP ini
+  loginAttemptSucceeded(req, cleanEmail); // reset hitungan gagal untuk akun ini saja
 
   const safeUser = { id: user.id, email: user.email, first_name: user.first_name, last_name: user.last_name };
   const token = issueSession(res, user.id, safeUser);
@@ -147,7 +147,7 @@ router.post('/logout', (req: Request, res: Response) => {
 // Dengan email infra (RESEND_API_KEY): link dikirim ke email user — token TIDAK muncul di layar.
 // Tanpa infra (mode personal): token dikembalikan via response (pemilik = admin). Jangan dipakai publik.
 
-router.post('/forgot-password', catchAsync(async (req: Request, res: Response) => {
+router.post('/forgot-password', forgotPasswordRateLimit, catchAsync(async (req: Request, res: Response) => {
   const { email } = req.body || {};
   if (typeof email !== 'string') return res.status(400).json({ error: 'Email wajib diisi' });
   const r = await query('SELECT id, email FROM users WHERE email = $1', [email.trim().toLowerCase()]);
@@ -157,7 +157,10 @@ router.post('/forgot-password', catchAsync(async (req: Request, res: Response) =
     // Respons samar anti-enumeration: selalu sukses meski email tak terdaftar
     return res.json({ success: true, message: 'Kalau email terdaftar, link reset sudah dikirim. Cek inbox (dan folder spam).' });
   }
-  // Fallback personal (tanpa email infra)
+  // Fallback personal (tanpa email infra) — HANYA diizinkan di NODE_ENV !== 'production'
+  if (env.NODE_ENV === 'production') {
+    return res.status(503).json({ error: 'Layanan email belum dikonfigurasi. Hubungi administrator.' });
+  }
   if (!u) return res.status(404).json({ error: 'Email tidak terdaftar' });
   const token = await sendResetEmail(u.email, u.id);
   res.json({ resetToken: token, expiresIn: '1 hour' });

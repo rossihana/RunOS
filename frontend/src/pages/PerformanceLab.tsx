@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '../services/api';
+import { toast } from 'react-hot-toast';
 import HRConfigWizard from '../components/training/HRConfigWizard';
 import HRZoneChart from '../components/charts/HRZoneChart';
-import VO2MaxCard from '../components/dashboard/VO2MaxCard';
+import HealthTrendChart from '../components/charts/HealthTrendChart';
 import CadenceCard from '../components/dashboard/CadenceCard';
 import InsightPanel from '../components/dashboard/InsightPanel';
 import RacePredictorCards from '../components/dashboard/RacePredictorCards';
@@ -21,6 +22,10 @@ interface LabData {
   readinessSeries?: any[];
   biomechanicalTrend?: any[];
   hrDrift?: { hasBase: boolean; driftPercentage: number } | null;
+  garminHealth?: { hrv: number | null; sleep: number | null; readiness: number | null; vo2max: number | null } | null;
+  garminHealthSeries?: Array<{ date: string; hrv: number | null; sleep: number | null; vo2max: number | null; rhr: number | null }>;
+  racePredictionsSource?: string;
+  trainingReadiness?: { score: number; band: string; components: { key: string; label: string; value: number; weight: number }[]; source: string } | null;
 }
 
 export default function PerformanceLab() {
@@ -47,6 +52,56 @@ export default function PerformanceLab() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Tombol Refresh = sync khusus data Lab (aktivitas 30hr + details → splits/decoupling
+  // + health → HRV/sleep/VO2max/RHR/prediksi). Pola sama dengan tombol Sync Dashboard:
+  // loading terus sampai sync SELESAI (polling 5 dtk), baru data lab dimuat ulang.
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      let usedPerUser = false;
+      // S7: Garmin terhubung di akun → jalur per-user (JWT, tanpa secret)
+      try {
+        const st = await api.get('/activities/garmin/status');
+        if (st.data?.connected) {
+          await api.post('/activities/garmin/sync', { days: 30, details: true, health: true });
+          usedPerUser = true;
+        }
+      } catch { /* fallback ke jalur owner */ }
+      // Jalur owner (SYNC_SECRET)
+      if (!usedPerUser) {
+        let secret = localStorage.getItem('runos_sync_secret') || '';
+        if (!secret) {
+          secret = prompt('Masukkan Sync Secret (lihat backend/.env SYNC_SECRET):') || '';
+          if (!secret) throw new Error('Sync dibatalkan — secret dibutuhkan');
+          localStorage.setItem('runos_sync_secret', secret);
+        }
+        await api.post('/activities/sync', { days: 30, details: true, health: true }, { headers: { 'X-Sync-Secret': secret } });
+      }
+
+      // Polling status tiap 5 dtk sampai done/failed (maks 5 menit)
+      let outcome: 'done' | 'failed' | 'timeout' = 'timeout';
+      for (let polls = 0; polls < 60; polls++) {
+        await new Promise(r => setTimeout(r, 5000));
+        try {
+          const st = await api.get('/activities/garmin/status');
+          const s = st.data?.status?.status;
+          if (s === 'done') { outcome = 'done'; break; }
+          if (s === 'failed') { outcome = 'failed'; toast.error(`Sync gagal: ${String(st.data?.status?.detail || '').slice(-160)}`); break; }
+        } catch { /* status sesaat gagal → lanjut polling */ }
+      }
+      if (outcome === 'done') toast.success('✅ Sync Lab selesai — data dimuat ulang!');
+      if (outcome === 'timeout') toast.error('Sync timeout — cek log sync (backend/tmp).');
+      await fetchData(true); // muat ulang data lab (finally-nya mematikan refreshing)
+    } catch (e: any) {
+      setRefreshing(false);
+      const msg = e?.response?.data?.error || e?.message || 'Sync gagal dimulai';
+      if (String(msg).includes('secret')) localStorage.removeItem('runos_sync_secret');
+      toast.error(msg);
+    }
+  }, [refreshing, fetchData]);
 
   const handleConfigSaved = () => {
     setShowSetup(false);
@@ -80,9 +135,9 @@ export default function PerformanceLab() {
 
   if (!labData) return null;
 
-  const { 
+  const {
     fitnessMetrics, performanceMetrics, zoneDistribution, labConfig,
-    racePredictions, readinessSeries, biomechanicalTrend, hrDrift 
+    racePredictions, readinessSeries, biomechanicalTrend, hrDrift, garminHealthSeries, racePredictionsSource, trainingReadiness
   } = labData;
 
   return (
@@ -106,11 +161,11 @@ export default function PerformanceLab() {
             <Settings className="w-4 h-4" /> HR Setup
           </button>
           <button
-            onClick={() => fetchData(true)}
+            onClick={handleRefresh}
             disabled={refreshing}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white transition-all text-sm font-bold disabled:opacity-50"
           >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> {refreshing ? 'Syncing…' : 'Sync & Refresh'}
           </button>
         </div>
       </div>
@@ -130,6 +185,11 @@ export default function PerformanceLab() {
           </div>
         ))}
       </div>
+
+      {/* Garmin Health Trend (HRV / Sleep / VO2max dari sync --health, 30 hari) */}
+      {garminHealthSeries && garminHealthSeries.length > 0 && (
+        <HealthTrendChart data={garminHealthSeries} />
+      )}
 
       {/* HR Config banner if no config */}
       {!labConfig && (
@@ -156,23 +216,23 @@ export default function PerformanceLab() {
           )}
         </div>
 
-        {/* VO2Max */}
-        <VO2MaxCard vo2max={fitnessMetrics.vo2max} age={labConfig?.age} />
-
         {/* Cadence */}
         <CadenceCard avgCadence={performanceMetrics.avgCadence} />
 
-        {/* Feature 1: Race Predictor */}
+        {/* Feature 1: Race Predictor (sumber dicetak di kartu) */}
         {racePredictions && racePredictions.length > 0 && (
           <div className="lg:col-span-1 xl:col-span-1">
-            <RacePredictorCards predictions={racePredictions} />
+            <RacePredictorCards
+              predictions={racePredictions}
+              sourceLabel={racePredictionsSource === 'garmin' ? 'Prediksi resmi Garmin (sync harian)' : 'Estimasi berbasis VO2Max & VDOT (belum sync health)'}
+            />
           </div>
         )}
 
-        {/* Feature 2: Readiness Series Chart (replaces the simple summary card) */}
-        {readinessSeries && readinessSeries.length > 0 ? (
+        {/* Feature 2: Readiness — skor FirstBeat-style + chart TSB (boleh salah satu saja) */}
+        {(readinessSeries && readinessSeries.length > 0) || trainingReadiness ? (
           <div className="lg:col-span-2 xl:col-span-3 min-w-0 flex flex-col">
-            <ReadinessChart data={readinessSeries} />
+            <ReadinessChart data={readinessSeries || []} readiness={trainingReadiness} />
           </div>
         ) : (
           <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 lg:col-span-2 xl:col-span-3 min-w-0">

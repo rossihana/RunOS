@@ -21,6 +21,7 @@ export function ThemeToggle({ hideLabel }: ThemeToggleProps) {
             : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
         }`}
         title="Light Mode"
+        aria-label="Light Mode"
       >
         <Sun className="h-4 w-4" />
       </button>
@@ -32,6 +33,7 @@ export function ThemeToggle({ hideLabel }: ThemeToggleProps) {
             : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
         }`}
         title="System Default"
+        aria-label="System Default"
       >
         <Monitor className="h-4 w-4" />
       </button>
@@ -43,6 +45,7 @@ export function ThemeToggle({ hideLabel }: ThemeToggleProps) {
             : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
         }`}
         title="Dark Mode"
+        aria-label="Dark Mode"
       >
         <Moon className="h-4 w-4" />
       </button>

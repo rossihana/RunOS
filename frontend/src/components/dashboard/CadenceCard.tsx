@@ -30,7 +30,7 @@ export default function CadenceCard({ avgCadence }: Props) {
         </div>
         <div>
           <h3 className="text-base font-black text-white">Cadence</h3>
-          <p className="text-[10px] text-zinc-500">Langkah per menit (rata-rata 30 hari)</p>
+          <p className="text-[10px] text-zinc-500">Median langkah per menit (30 hari)</p>
         </div>
       </div>
 
@@ -40,12 +40,15 @@ export default function CadenceCard({ avgCadence }: Props) {
             <span className="text-5xl font-black text-white">{avgCadence}</span>
             <span className="text-sm text-zinc-500 pb-1">spm</span>
           </div>
-          {/* Progress bar to 200 spm */}
-          <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden mb-3">
+          {/* Progress bar 0-200 + tick 180 (90%) — label proporsional, bukan justify-between (dulu salah posisi) */}
+          <div className="relative w-full h-2 bg-zinc-800 rounded-full overflow-hidden mb-1">
             <div className={`h-full rounded-full transition-all ${status?.barColor}`} style={{ width: `${fillPct}%` }} />
+            <div className="absolute inset-y-0 w-px bg-white/60" style={{ left: '90%' }} />
           </div>
-          <div className="flex justify-between text-[10px] text-zinc-600 mb-4">
-            <span>0</span><span>160</span><span className="font-bold text-zinc-500">180✓</span><span>200</span>
+          <div className="relative w-full h-4 mb-4 text-[10px] text-zinc-600 whitespace-nowrap">
+            <span className="absolute left-0 top-0">0</span>
+            <span className="absolute top-0 font-bold text-zinc-500" style={{ left: '90%', transform: 'translateX(-50%)' }}>180✓</span>
+            <span className="absolute right-0 top-0">200</span>
           </div>
           <div className={`inline-flex items-center px-3 py-1 rounded-full border text-xs font-bold ${status?.bg} ${status?.color}`}>
             {status?.label}

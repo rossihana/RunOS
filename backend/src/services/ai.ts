@@ -26,8 +26,10 @@ export const FALLBACK_MODELS = ["gemini/gemini-3.8-flash", "gemini/gemini-3.7-fl
 // (eksklusif untuk pemilik). Probe 09-09: qwen3.8-flash cepat & solid (1.1s),
 // hy3 bisa return kosong tanpa max_tokens (wajib set max_tokens),
 // mimo-v2.5 lambat (7-21s) tapi berfungsi.
-export const FREE_MODELS = ["b-ai/qwen3.8-flash", "b-ai/hy3", "b-ai/mimo-v2.5"];
-export const FREE_DEFAULT_MODEL = "b-ai/qwen3.8-flash";
+export const FREE_MODELS = ["kios-ai/muse-spark-1.3-contributor", "b-ai/qwen3.8-flash", "b-ai/hy3", "b-ai/mimo-v2.5"];
+export const FREE_DEFAULT_MODEL = "kios-ai/muse-spark-1.3-contributor";
+// ":free" suffix = OpenRouter free tier — lewat 9router pemilik app, BUKAN BYOK user.
+export const FREE_HOSTED_PREFIXES = ["openrouter/"];
 /** Email pemilik app — bebas pakai semua model termasuk glm-5.3-flash. */
 export const OWNER_EMAILS: string[] = (env.OWNER_EMAILS || "")
   .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
@@ -40,16 +42,20 @@ export interface AISettings {
   customProviders?: Record<string, { baseUrl: string; apiKey: string }>; // nama -> kredensial
   /** Internal: false = model eksplisit dipilih user -> JANGAN silent-fallback ke model lain */
   allowFallback?: boolean;
+  /** Internal: rantai fallback alternatif (non-owner = katalog gratis, bukan FALLBACK_MODELS premium) */
+  fallbackModels?: string[];
 }
 
 /** Resolve model untuk satu fitur + aturan fallback:
  *  user eksplisit memilih (feature override / defaultModel) -> strict (no fallback);
- *  tidak memilih (pakai DEFAULT_MODEL) -> boleh fallback chain. */
+ *  tidak memilih (pakai DEFAULT_MODEL) -> boleh fallback chain.
+ *  fallbackModels (internal): rantai alternatif — non-owner = katalog FREE (premium owner tidak dipakai user lain). */
 export function featureModel(feature: string, settings: AISettings): { model: string; settings: AISettings } {
   const chosen = settings.features?.[feature] || settings.defaultModel || null;
+  const { fallbackModels, ...rest } = settings;
   return {
     model: chosen || DEFAULT_MODEL,
-    settings: { ...settings, allowFallback: !chosen },
+    settings: { ...rest, allowFallback: !chosen, fallbackModels },
   };
 }
 
@@ -153,7 +159,9 @@ export async function generateAIJson<T>(
   settings: AISettings = {}
 ): Promise<T> {
   const fullPrompt = context ? `Context data:\n${context}\n\nUser Question/Request:\n${prompt}` : prompt;
-  const models = settings.allowFallback === false ? [model] : [model, ...FALLBACK_MODELS.filter(f => f !== model)];
+  // Rantai fallback: custom user (jika diset) > premium bawaan; strict mode = model saja
+  const chain = settings.fallbackModels?.length ? settings.fallbackModels : FALLBACK_MODELS;
+  const models = settings.allowFallback === false ? [model] : [model, ...chain.filter(f => f !== model)];
   const errors: string[] = [];
   for (const m of models) {
     const client = clientFor(m, settings);
@@ -216,7 +224,9 @@ export async function generateAIChat(
   model: string,
   settings: AISettings = {}
 ): Promise<string> {
-  const models = settings.allowFallback === false ? [model] : [model, ...FALLBACK_MODELS.filter(f => f !== model)];
+  const models = settings.allowFallback === false
+    ? [model]
+    : [model, ...(settings.fallbackModels?.length ? settings.fallbackModels : FALLBACK_MODELS).filter(f => f !== model)];
   let lastErr: unknown;
   for (const m of models) {
     const client = clientFor(m, settings);
@@ -247,7 +257,9 @@ export async function generateAIChatStream(
   onDelta: (text: string) => void,
   settings: AISettings = {}
 ): Promise<string> {
-  const models = settings.allowFallback === false ? [model] : [model, ...FALLBACK_MODELS.filter(f => f !== model)];
+  const models = settings.allowFallback === false
+    ? [model]
+    : [model, ...(settings.fallbackModels?.length ? settings.fallbackModels : FALLBACK_MODELS).filter(f => f !== model)];
   let lastErr: unknown;
   for (const m of models) {
     const client = clientFor(m, settings);

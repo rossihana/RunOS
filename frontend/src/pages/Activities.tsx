@@ -31,7 +31,7 @@ export default function Activities() {
   useEffect(() => {
     const fetchActivities = async () => {
       try {
-        const response = await api.get('/activities');
+        const response = await api.get('/activities?withPolyline=1');
         setActivities(response.data);
       } catch (error) {
         console.error('Failed to fetch activities', error);

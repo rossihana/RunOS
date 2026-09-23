@@ -9,9 +9,10 @@ interface RacePrediction {
 
 interface Props {
   predictions: RacePrediction[];
+  sourceLabel?: string;
 }
 
-export default function RacePredictorCards({ predictions }: Props) {
+export default function RacePredictorCards({ predictions, sourceLabel }: Props) {
   if (!predictions || predictions.length === 0) return null;
 
   const formatTime = (totalSeconds: number) => {
@@ -43,7 +44,7 @@ export default function RacePredictorCards({ predictions }: Props) {
         </div>
         <div>
           <h3 className="text-base font-black text-white">Race Predictor</h3>
-          <p className="text-[10px] text-zinc-500">Estimasi berbasis VO2Max & VDOT</p>
+          <p className="text-[10px] text-zinc-500">{sourceLabel || 'Estimasi berbasis VO2Max & VDOT'}</p>
         </div>
       </div>
       

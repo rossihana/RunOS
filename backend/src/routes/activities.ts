@@ -8,11 +8,14 @@ const router = Router();
 router.get('/', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
   // ponytail: list endpoint strips map_polyline (heavy); detail page fetches it via /:id
   const limit = Math.min(Number(req.query.limit) || 200, 200);
+  // ponytail: polyline heavy — hanya dikirim kalau diminta (?withPolyline=1, dipakai halaman Activities)
+  const wantPolyline = req.query.withPolyline === '1';
   const result = await query(
     `SELECT 
       id, garmin_activity_id, name, distance, moving_time, elapsed_time,
       average_speed, average_pace, max_speed, average_heartrate, max_heartrate,
       elevation_gain, start_date, start_date_local, details_fetched
+      ${wantPolyline ? ', map_polyline' : ''}
      FROM activities 
      WHERE user_id = $1 
      ORDER BY start_date DESC
@@ -90,10 +93,47 @@ router.get('/lab', authenticate, async (req: AuthRequest, res) => {
 
     const vo2max = estimateVO2Max(activities, labConfig?.maxHr);
 
+    // Health Garmin (Fase 2): HRV/sleep/VO2max resmi dari health_daily (sync --health)
+    let garminHealth: { hrv: number | null; sleep: number | null; readiness: number | null; vo2max: number | null } | null = null;
+    let healthRow: any = null;
+    let garminHealthSeries: Array<{ date: string; hrv: number | null; sleep: number | null; vo2max: number | null; rhr: number | null; stress: number | null }> = [];
+    try {
+      const hRes = await query(
+        `SELECT hrv_ms, sleep_score, readiness_score, vo2max_garmin, pred_5k_s, pred_10k_s, pred_hm_s, pred_fm_s FROM health_daily WHERE user_id = $1 ORDER BY date DESC LIMIT 1`,
+        [userId]
+      );
+      if (hRes.rows.length > 0) {
+        const h = hRes.rows[0];
+        healthRow = h;
+        garminHealth = { hrv: h.hrv_ms, sleep: h.sleep_score, readiness: h.readiness_score, vo2max: h.vo2max_garmin };
+      }
+      // Trend 30 hari terakhir untuk chart HRV/Sleep/VO2max
+      const sRes = await query(
+        `SELECT date, hrv_ms, sleep_score, vo2max_garmin, rhr, (raw->>'stress')::float AS stress FROM health_daily WHERE user_id = $1 ORDER BY date DESC LIMIT 30`,
+        [userId]
+      );
+      garminHealthSeries = sRes.rows.reverse().map((r: any) => {
+        // pg mengembalikan DATE sebagai objek Date — format manual ke YYYY-MM-DD
+        const dt: Date = r.date instanceof Date ? r.date : new Date(r.date);
+        const date = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        return { date, hrv: r.hrv_ms, sleep: r.sleep_score, vo2max: r.vo2max_garmin, rhr: r.rhr, stress: r.stress };
+      });
+    } catch (_) { /* tabel belum ada (belum pernah --health) */ }
+
+    // Race predictor: jangkar VO2max resmi Garmin kalau ada (lebih akurat dari rumus), fallback rumus
+    const vo2maxAnchor = garminHealth?.vo2max || vo2max;
+
+    // Fix cadence: Garmin simpan per-kaki x2 di sebagian data — nilai >220 dibagi 2
+    const normCadence = (c: number) => (c > 220 ? c / 2 : c);
+
     const cadenceActivities = activities.filter(a => a.cadence && a.cadence > 0);
-    const avgCadence = cadenceActivities.length > 0
-      ? Math.round(cadenceActivities.reduce((sum, a) => sum + a.cadence, 0) / cadenceActivities.length)
-      : null;
+    // Median (bukan mean): tahan outlier — lari recovery/walk-break (132-146) narik mean ~7 spm
+    let avgCadence: number | null = null;
+    if (cadenceActivities.length > 0) {
+      const vals = cadenceActivities.map(a => normCadence(a.cadence)).sort((x, y) => x - y);
+      const mid = Math.floor(vals.length / 2);
+      avgCadence = vals.length % 2 ? Math.round(vals[mid]) : Math.round((vals[mid - 1] + vals[mid]) / 2);
+    }
 
     const allActivities = await query(
       `SELECT COALESCE(start_date_local, start_date::date::text) as start_date, moving_time, average_heartrate, distance, cadence, average_speed FROM activities WHERE user_id = $1 ORDER BY start_date ASC`,
@@ -103,8 +143,21 @@ router.get('/lab', authenticate, async (req: AuthRequest, res) => {
     const readiness = calculateReadiness(allActivities.rows);
     const readinessSeries = readiness.series;
 
-    // 1. Race Predictor (Based on VO2Max -> vVO2Max -> fatigue curve)
-    const racePredictions = predictRaceTimes(vo2max);
+    // 1. Race Predictor: prediksi resmi Garmin per-hari (sumber sama persis dengan jam)
+    //    — fallback estimasi VO2max kalau belum pernah sync --health
+    let racePredictions: Array<{ name: string; distance: number; time: number }> = [];
+    let racePredictionsSource = 'estimate';
+    if (healthRow?.pred_5k_s) {
+      racePredictions = [
+        { name: '5K', distance: 5000, time: healthRow.pred_5k_s },
+        { name: '10K', distance: 10000, time: healthRow.pred_10k_s },
+        { name: 'Half Marathon', distance: 21097, time: healthRow.pred_hm_s },
+        { name: 'Marathon', distance: 42195, time: healthRow.pred_fm_s },
+      ].filter(p => p.time != null);
+      racePredictionsSource = 'garmin';
+    } else {
+      racePredictions = predictRaceTimes(vo2maxAnchor);
+    }
 
     // 2. Biomechanical Trend (Last 12 weeks of cadence and stride)
     const biomechanicalTrend = calculateBiomechanicalTrend(allActivities.rows);
@@ -123,11 +176,68 @@ router.get('/lab', authenticate, async (req: AuthRequest, res) => {
       hrDrift = calculateAerobicDecoupling(driftRes.rows[0].splits);
     }
 
+    // Training Readiness ala FirstBeat/Garmin — komponen & band mengikuti metode Garmin
+    // (tidur, HRV, stress, recovery, beban); bobot aproksimasi (bobot asli propietar).
+    // Compute on-read: tanpa kolom DB — ubah rumus → semua riwayat ikut.
+    // ponytail: recovery proxied dari durasi (EPOC tak tersedia via API) → upgrade: pakai endpoint resmi kalau muncul.
+    const trainingReadiness = (() => {
+      const hrvs = garminHealthSeries.map(s => s.hrv).filter((v): v is number => v != null);
+      const avg = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length;
+      const hrv7 = hrvs.slice(-7);
+      const hrvBase = hrvs.slice(0, Math.max(1, hrvs.length - 7));
+      const hrvComp = hrv7.length >= 3 && hrvBase.length >= 7
+        ? Math.max(0, Math.min(100, 50 + ((avg(hrv7) - avg(hrvBase)) / avg(hrvBase)) * 200))
+        : null;
+      const latest = garminHealthSeries[garminHealthSeries.length - 1];
+      const sleepComp = latest?.sleep ?? null;
+      const stressComp = latest?.stress != null ? Math.max(0, Math.min(100, 100 - latest.stress)) : null;
+      // Recovery: jam sejak akhir aktivitas terakhir vs kebutuhan pulih (12 + 6×jam_lari, cap 48 jam)
+      let lastEnd = 0, lastMovingH = 0;
+      for (const a of activities) {
+        if (!a.start_date) continue;
+        const sd = a.start_date instanceof Date ? a.start_date : new Date(a.start_date);
+        const end = sd.getTime() + (a.moving_time || 0) * 1000;
+        if (end > lastEnd) { lastEnd = end; lastMovingH = (a.moving_time || 0) / 3600; }
+      }
+      const recoveryComp = lastEnd
+        ? Math.max(0, Math.min(100, ((Date.now() - lastEnd) / 3600000) / Math.min(48, 12 + lastMovingH * 6) * 100))
+        : null;
+      // Beban: rasio ATL/CTL — sweet spot 0.8–1.3 (mirip acute:chronic ratio)
+      const lastRs = readinessSeries[readinessSeries.length - 1];
+      let loadComp: number | null = null;
+      if (lastRs && lastRs.fitness > 0) {
+        const ratio = lastRs.fatigue / lastRs.fitness;
+        loadComp = ratio >= 0.8 && ratio <= 1.3 ? 100
+          : ratio < 0.8 ? Math.max(50, 100 - (0.8 - ratio) * 150)
+          : Math.max(0, 100 - (ratio - 1.3) * 200);
+      }
+      const parts = [
+        { key: 'sleep', label: 'Tidur', value: sleepComp, weight: 0.30 },
+        { key: 'hrv', label: 'HRV', value: hrvComp, weight: 0.20 },
+        { key: 'stress', label: 'Stress', value: stressComp, weight: 0.20 },
+        { key: 'recovery', label: 'Recovery', value: recoveryComp, weight: 0.15 },
+        { key: 'load', label: 'Beban', value: loadComp, weight: 0.15 },
+      ].filter((p): p is { key: string; label: string; value: number; weight: number } => p.value != null);
+      if (parts.length === 0) return null;
+      const wsum = parts.reduce((s, p) => s + p.weight, 0);
+      const score = Math.round(parts.reduce((s, p) => s + p.value * p.weight, 0) / wsum);
+      const band = score < 25 ? 'Sangat Rendah' : score < 50 ? 'Rendah' : score < 75 ? 'Sedang' : 'Tinggi';
+      return {
+        score, band,
+        components: parts.map(p => ({ ...p, weight: Math.round((p.weight / wsum) * 100) })),
+        source: 'runos-firstbeat',
+      };
+    })();
+
     res.json({
       labConfig, zones, zoneDistribution,
-      fitnessMetrics: { vo2max, fitness: readiness.fitness, fatigue: readiness.fatigue, form: readiness.form },
+      fitnessMetrics: { vo2max: vo2maxAnchor, fitness: readiness.fitness, fatigue: readiness.fatigue, form: readiness.form },
       performanceMetrics: { avgCadence, totalActivities30d: activities.length, totalKm30d: Math.round(activities.reduce((sum, a) => sum + (a.distance / 1000), 0)) },
+      garminHealth,
+      garminHealthSeries,
+      trainingReadiness,
       racePredictions,
+      racePredictionsSource,
       readinessSeries,
       biomechanicalTrend,
       hrDrift
@@ -187,8 +297,8 @@ router.post('/garmin/sync', authenticate, catchAsync(async (req: AuthRequest, re
   if (!(await m.garminConnected(userId))) {
     return res.status(400).json({ error: 'Hubungkan Garmin dulu di Pengaturan.' });
   }
-  const { days, details } = req.body || {};
-  m.queueSync(userId, days ? Number(days) : undefined, Boolean(details));
+  const { days, details, health } = req.body || {};
+  m.queueSync(userId, m.clampDays(days ? Number(days) : undefined), Boolean(details), Boolean(health));
   res.json({ success: true, message: 'Sync Garmin dimulai — menunggu sampai selesai…' });
 }));
 
@@ -205,9 +315,9 @@ router.post('/sync', catchAsync(async (req: Request, res: Response, next: NextFu
   if (!syncAuthorized(req)) {
     return res.status(403).json({ error: 'Sync secret tidak valid / tidak diset' });
   }
-  const { days, details } = req.body || {};
+  const { days, details, health } = req.body || {};
   const m = await import('../services/garminPerUser.js');
-  const queued = await m.queueAllConnected(days ? Number(days) : undefined, Boolean(details));
+  const queued = await m.queueAllConnected(m.clampDays(days ? Number(days) : undefined), Boolean(details), Boolean(health));
   res.json({ success: true, message: `Sync dimulai untuk ${queued} user terhubung (antrean).` });
 }));
 

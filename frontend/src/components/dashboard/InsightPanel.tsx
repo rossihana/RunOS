@@ -51,7 +51,7 @@ function generateInsights(fitness: Props): Insight[] {
 
   // VO2Max
   if (vo2max && vo2max < 40)
-    insights.push({ emoji: '🫁', category: 'Kapasitas Aerobik', severity: 'warn', text: `VO2Max estimasi ${vo2max} ml/kg/min — masih bisa jauh lebih tinggi! Long run Zona 2 adalah kunci utamanya.` });
+    insights.push({ emoji: '🫁', category: 'Kapasitas Aerobik', severity: 'warn', text: `VO2Max ${vo2max} ml/kg/min — masih bisa jauh lebih tinggi! Long run Zona 2 adalah kunci utamanya.` });
   else if (vo2max && vo2max >= 50)
     insights.push({ emoji: '🏅', category: 'Kapasitas Aerobik', severity: 'good', text: `VO2Max ${vo2max} ml/kg/min — kapasitas aerobik kamu sangat baik untuk seorang pelari! Pertahankan!` });
 

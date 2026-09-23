@@ -1,25 +1,52 @@
 import { useEffect, useState } from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import api from '../../services/api';
 
 export default function ProtectedRoute() {
-  const [status, setStatus] = useState<'loading' | 'authenticated' | 'unauthenticated'>('loading');
+  const location = useLocation();
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const [status, setStatus] = useState<'loading' | 'authenticated' | 'unauthenticated'>(
+    token ? 'loading' : 'unauthenticated'
+  );
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      setStatus('unauthenticated');
-      return;
-    }
-
-    // Verify token is still valid by calling /api/auth/me
-    api.get('/auth/me')
-      .then(() => setStatus('authenticated'))
-      .catch(() => {
-        localStorage.removeItem('token');
+    const verifyAuth = () => {
+      const currentToken = localStorage.getItem('token');
+      if (!currentToken) {
         setStatus('unauthenticated');
-      });
-  }, []);
+        return;
+      }
+
+      api.get('/auth/me')
+        .then(() => setStatus('authenticated'))
+        .catch(() => {
+          localStorage.removeItem('token');
+          setStatus('unauthenticated');
+        });
+    };
+
+    verifyAuth();
+
+    // Mencegah akses via bfcache (Back/Forward browser mouse/button) setelah logout
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted || !localStorage.getItem('token')) {
+        if (!localStorage.getItem('token')) {
+          setStatus('unauthenticated');
+          window.location.replace('/login');
+          return;
+        }
+        verifyAuth();
+      }
+    };
+
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, [location.pathname]);
+
+  // Pengecekan sinkron: jika token sudah tidak ada di localStorage, tolak seketika
+  if (!token || status === 'unauthenticated') {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
 
   if (status === 'loading') {
     return (
@@ -30,10 +57,6 @@ export default function ProtectedRoute() {
         </div>
       </div>
     );
-  }
-
-  if (status === 'unauthenticated') {
-    return <Navigate to="/login" replace />;
   }
 
   return <Outlet />;

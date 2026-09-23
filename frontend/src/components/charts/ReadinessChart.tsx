@@ -27,8 +27,17 @@ interface ReadinessData {
   activities?: ActivityMeta[];
 }
 
+// Training Readiness ala FirstBeat/Garmin (dihitung backend, compute on-read)
+export interface TrainingReadiness {
+  score: number;
+  band: string;
+  components: { key: string; label: string; value: number; weight: number }[];
+  source: string;
+}
+
 interface Props {
   data: ReadinessData[];
+  readiness?: TrainingReadiness | null;
 }
 
 // Custom Tooltip Component
@@ -65,9 +74,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         </div>
         <div>
           <div className="text-[9px] text-zinc-400 font-bold uppercase">Form</div>
-          <div className={`text-sm font-black ${formColor}`}>
-            {formValue > 0 ? "+" + formValue : formValue}
-          </div>
+          <div className={`text-sm font-black ${formColor}`}>{formValue > 0 ? "+" + formValue : formValue}</div>
         </div>
       </div>
 
@@ -104,11 +111,11 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   );
 };
 
-const ReadinessChart: React.FC<Props> = ({ data }) => {
-  if (!data || data.length === 0) return null;
+const ReadinessChart: React.FC<Props> = ({ data, readiness }) => {
+  if ((!data || data.length === 0) && !readiness) return null;
 
-  const todayData = data[data.length - 1];
-  const { form, fitness, fatigue } = todayData;
+  const todayData = data && data.length ? data[data.length - 1] : null;
+  const form = todayData?.form ?? 0;
 
   let statusColor = "text-yellow-600 dark:text-yellow-400";
   let statusBg = "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800";
@@ -127,6 +134,11 @@ const ReadinessChart: React.FC<Props> = ({ data }) => {
     StatusIcon = ShieldAlert;
   }
 
+  const bandColor =
+    !readiness ? 'text-zinc-400' :
+    readiness.band === 'Tinggi' ? 'text-emerald-500' :
+    readiness.band === 'Sedang' ? 'text-yellow-500' : 'text-rose-500';
+
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 border border-zinc-200 dark:border-zinc-800 shadow-sm flex flex-col h-full animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
@@ -136,30 +148,71 @@ const ReadinessChart: React.FC<Props> = ({ data }) => {
             Training Readiness
           </h2>
           <p className="text-sm text-zinc-500 font-medium mt-1">
-            Fitness vs Fatigue balance (TSB Model)
+            {readiness
+              ? `Estimasi RunOS — metode FirstBeat (${readiness.components.map(c => c.label).join(' · ')})`
+              : 'Fitness vs Fatigue balance (TSB Model)'}
           </p>
         </div>
 
-        <div className={`px-4 py-2 rounded-xl border flex items-center gap-2 ${statusBg}`}>
-          <StatusIcon className={`w-4 h-4 ${statusColor}`} />
-          <div>
-             <div className="text-[10px] uppercase font-bold text-zinc-500 opacity-80 tracking-wider">Today's Form</div>
-             <div className={`text-sm font-black ${statusColor}`}>
-               {form > 0 ? "+" + form : form} • {statusText}
-             </div>
+        {todayData && (
+          <div className={`px-4 py-2 rounded-xl border flex items-center gap-2 ${statusBg}`}>
+            <StatusIcon className={`w-4 h-4 ${statusColor}`} />
+            <div>
+               <div className="text-[10px] uppercase font-bold text-zinc-500 opacity-80 tracking-wider">Today's Form</div>
+               <div className={`text-sm font-black ${statusColor}`}>
+                 {form > 0 ? "+" + form : form} • {statusText}
+               </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
+      {/* FirstBeat-style readiness: skor + komponen */}
+      {readiness && (
+        <div className="mb-6 p-4 rounded-2xl border border-indigo-200/60 dark:border-indigo-800/40 bg-indigo-50/50 dark:bg-indigo-900/10">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[10px] font-black uppercase tracking-wider text-zinc-500">
+              Readiness (FirstBeat-style)
+            </span>
+            <span className="text-2xl font-black text-zinc-900 dark:text-white">
+              {readiness.score}
+              <span className="text-xs font-bold text-zinc-400">/100</span>
+              <span className={`text-sm font-black ml-2 ${bandColor}`}>{readiness.band}</span>
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            {readiness.components.map(c => (
+              <div key={c.key}>
+                <div className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 flex justify-between">
+                  <span>{c.label}</span><span>{c.weight}%</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-700 mt-1 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${c.value >= 75 ? 'bg-emerald-500' : c.value >= 50 ? 'bg-yellow-500' : 'bg-rose-500'}`}
+                    style={{ width: `${Math.round(c.value)}%` }}
+                  />
+                </div>
+                <div className="text-xs font-black text-zinc-700 dark:text-zinc-300 mt-0.5">{Math.round(c.value)}</div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[9px] text-zinc-400 mt-2">
+            Estimasi RunOS: komponen & band mengikuti metode FirstBeat/Garmin; bobot aproksimasi (bobot asli propietar).
+          </p>
+        </div>
+      )}
+
+      {todayData && (
+        <>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
          <div className="p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-100 dark:border-zinc-800">
            <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mb-1">Fitness (CTL)</div>
-           <div className="text-xl font-black text-indigo-600 dark:text-indigo-400">{fitness}</div>
+           <div className="text-xl font-black text-indigo-600 dark:text-indigo-400">{todayData.fitness}</div>
            <div className="text-[10px] text-zinc-400 mt-1 leading-tight">42-day avg load</div>
          </div>
          <div className="p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-100 dark:border-zinc-800">
            <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mb-1">Fatigue (ATL)</div>
-           <div className="text-xl font-black text-orange-600 dark:text-orange-400">{fatigue}</div>
+           <div className="text-xl font-black text-orange-600 dark:text-orange-400">{todayData.fatigue}</div>
            <div className="text-[10px] text-zinc-400 mt-1 leading-tight">7-day avg load</div>
          </div>
          <div className="p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-100 dark:border-zinc-800 hidden md:block">
@@ -195,11 +248,11 @@ const ReadinessChart: React.FC<Props> = ({ data }) => {
             <YAxis 
               axisLine={false} 
               tickLine={false} 
-              tick={{ fontSize: 10, fill: '#71717a' }} 
+              tick={{ fontSize: 10, fill: '#71717a' }}
             />
             <Tooltip 
               content={<CustomTooltip />}
-              cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }}
+              cursor={{ stroke: '#6366f1', strokeWidth: 2, strokeDasharray: '4 4' }}
             />
             <ReferenceLine y={0} stroke="#a1a1aa" strokeDasharray="3 3" />
             <Area 
@@ -207,7 +260,7 @@ const ReadinessChart: React.FC<Props> = ({ data }) => {
               dataKey="fitness" 
               name="Fitness (CTL)"
               stroke="#6366f1" 
-              strokeWidth={3}
+              strokeWidth={3} 
               fillOpacity={1} 
               fill="url(#colorFitness)" 
               animationDuration={1500}
@@ -217,7 +270,7 @@ const ReadinessChart: React.FC<Props> = ({ data }) => {
               dataKey="fatigue" 
               name="Fatigue (ATL)"
               stroke="#f97316" 
-              strokeWidth={2}
+              strokeWidth={2} 
               fillOpacity={1} 
               fill="url(#colorFatigue)" 
               animationDuration={1500}
@@ -225,9 +278,10 @@ const ReadinessChart: React.FC<Props> = ({ data }) => {
           </AreaChart>
         </ResponsiveContainer>
       </div>
+        </>
+      )}
     </div>
   );
 };
 
 export default ReadinessChart;
-

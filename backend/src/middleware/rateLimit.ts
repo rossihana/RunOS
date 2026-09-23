@@ -7,42 +7,99 @@ import { AuthRequest } from './auth.js';
  * Slide window: hitung baris < window; bersihkan baris lawas saat INSERT.
  */
 
-// ── Login limiter (in-memory per IP) ──
+// ── Login limiter (in-memory per IP & per account) ──
 // Login belum punya user id, jadi limiter DB per-user tidak bisa dipakai.
 // In-memory cukup untuk single-instance; kalau multi-instance, naikkan ke Redis. // ponytail: pindah ke Redis saat deploy >1 instance
 const loginAttempts = new Map<string, number[]>();
-const LOGIN_LIMIT = 10;          // max attempt
+const ipAttempts = new Map<string, number[]>();
+const LOGIN_ACCOUNT_LIMIT = 5;       // max 5 attempt gagal per akun per IP
+const LOGIN_IP_LIMIT = 20;           // max 20 attempt gagal total per IP
 const LOGIN_WINDOW_MS = 15 * 60 * 1000; // per 15 menit
 
 export function loginRateLimit(req: Request, res: Response, next: NextFunction) {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const { email } = req.body || {};
+  const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
   const now = Date.now();
-  const arr = (loginAttempts.get(ip) || []).filter(t => now - t < LOGIN_WINDOW_MS);
-  if (arr.length >= LOGIN_LIMIT) {
-    return res.status(429).json({ error: 'Terlalu banyak percobaan login. Coba lagi dalam 15 menit.' });
+
+  // 1. Cek limit global per-IP (mencegah spraying banyak akun dari 1 IP)
+  const ipArr = (ipAttempts.get(ip) || []).filter(t => now - t < LOGIN_WINDOW_MS);
+  if (ipArr.length >= LOGIN_IP_LIMIT) {
+    return res.status(429).json({ error: 'Terlalu banyak percobaan login dari IP ini. Coba lagi dalam 15 menit.' });
   }
+
+  // 2. Cek limit per-akun dari IP ini
+  if (cleanEmail) {
+    const key = `${ip}:${cleanEmail}`;
+    const accArr = (loginAttempts.get(key) || []).filter(t => now - t < LOGIN_WINDOW_MS);
+    if (accArr.length >= LOGIN_ACCOUNT_LIMIT) {
+      return res.status(429).json({ error: 'Terlalu banyak percobaan login untuk akun ini. Coba lagi dalam 15 menit.' });
+    }
+  }
+
   next();
 }
 
-/** Login sukses → hapus hitungan attempt IP ini (hanya attempt GAGAL yang dihitung). */
-export function loginAttemptSucceeded(req: Request) {
+/** Login sukses → hapus hitungan attempt GAGAL HANYA untuk akun ini (bukan seluruh IP). */
+export function loginAttemptSucceeded(req: Request, email?: string) {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  loginAttempts.delete(ip);
+  if (email) {
+    loginAttempts.delete(`${ip}:${email.trim().toLowerCase()}`);
+  }
 }
 
-/** Login gagal → catat 1 hit (dipanggil dari route sebelum mengirim 401). */
-export function loginAttemptFailed(req: Request) {
+/** Login gagal → catat 1 hit pada akun dan IP (dipanggil dari route sebelum mengirim 401). */
+export function loginAttemptFailed(req: Request, email?: string) {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const now = Date.now();
-  const arr = (loginAttempts.get(ip) || []).filter(t => now - t < LOGIN_WINDOW_MS);
-  arr.push(now);
-  loginAttempts.set(ip, arr);
+
+  // Catat ke total IP
+  const ipArr = (ipAttempts.get(ip) || []).filter(t => now - t < LOGIN_WINDOW_MS);
+  ipArr.push(now);
+  ipAttempts.set(ip, ipArr);
+
+  // Catat ke akun spesifik
+  if (email) {
+    const key = `${ip}:${email.trim().toLowerCase()}`;
+    const accArr = (loginAttempts.get(key) || []).filter(t => now - t < LOGIN_WINDOW_MS);
+    accArr.push(now);
+    loginAttempts.set(key, accArr);
+  }
+
   // bersihkan entry lawas biar Map tidak bocor memori
   if (loginAttempts.size > 1000) {
     for (const [k, v] of loginAttempts) {
       if (!v.some(t => now - t < LOGIN_WINDOW_MS)) loginAttempts.delete(k);
     }
   }
+  if (ipAttempts.size > 1000) {
+    for (const [k, v] of ipAttempts) {
+      if (!v.some(t => now - t < LOGIN_WINDOW_MS)) ipAttempts.delete(k);
+    }
+  }
+}
+
+// ── Forgot password limiter ──
+const forgotAttempts = new Map<string, number[]>();
+const FORGOT_LIMIT = 5;
+const FORGOT_WINDOW_MS = 15 * 60 * 1000;
+
+export function forgotPasswordRateLimit(req: Request, res: Response, next: NextFunction) {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const arr = (forgotAttempts.get(ip) || []).filter(t => now - t < FORGOT_WINDOW_MS);
+  if (arr.length >= FORGOT_LIMIT) {
+    return res.status(429).json({ error: 'Terlalu banyak permintaan reset password. Coba lagi dalam 15 menit.' });
+  }
+  arr.push(now);
+  forgotAttempts.set(ip, arr);
+
+  if (forgotAttempts.size > 1000) {
+    for (const [k, v] of forgotAttempts) {
+      if (!v.some(t => now - t < FORGOT_WINDOW_MS)) forgotAttempts.delete(k);
+    }
+  }
+  next();
 }
 
 export function aiRateLimit(endpoint: string, limit: number, windowSec = 60) {

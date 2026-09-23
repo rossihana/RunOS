@@ -82,7 +82,7 @@ export default function Dashboard() {
       { queryKey: ['dashboard', 'races'], queryFn: async () => (await api.get('/races')).data },
       { queryKey: ['dashboard', 'trainingLog'], queryFn: async () => (await api.get('/analytics/training-log')).data },
       { queryKey: ['dashboard', 'recentTrend'], queryFn: async () => (await api.get('/analytics/recent-trend')).data },
-      { queryKey: ['dashboard', 'activities'], queryFn: async () => (await api.get('/activities?limit=5')).data },
+      { queryKey: ['dashboard', 'activities'], queryFn: async () => (await api.get('/activities?limit=5&withPolyline=1')).data },
       { queryKey: ['dashboard', 'readiness'], queryFn: async () => (await api.get('/activities/analytics/readiness')).data }
     ]
   });
