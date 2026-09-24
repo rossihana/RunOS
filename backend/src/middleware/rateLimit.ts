@@ -79,28 +79,32 @@ export function loginAttemptFailed(req: Request, email?: string) {
   }
 }
 
-// ── Forgot password limiter ──
-const forgotAttempts = new Map<string, number[]>();
-const FORGOT_LIMIT = 5;
-const FORGOT_WINDOW_MS = 15 * 60 * 1000;
-
-export function forgotPasswordRateLimit(req: Request, res: Response, next: NextFunction) {
-  const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const now = Date.now();
-  const arr = (forgotAttempts.get(ip) || []).filter(t => now - t < FORGOT_WINDOW_MS);
-  if (arr.length >= FORGOT_LIMIT) {
-    return res.status(429).json({ error: 'Terlalu banyak permintaan reset password. Coba lagi dalam 15 menit.' });
-  }
-  arr.push(now);
-  forgotAttempts.set(ip, arr);
-
-  if (forgotAttempts.size > 1000) {
-    for (const [k, v] of forgotAttempts) {
-      if (!v.some(t => now - t < FORGOT_WINDOW_MS)) forgotAttempts.delete(k);
+// ── IP window limiter generik: dipakai forgot-password & register ──
+// (dulu blok forgotPasswordRateLimit manual — didedup jadi pabrik)
+function ipWindowLimiter(name: string, limit: number, windowMs: number) {
+  const hits = new Map<string, number[]>();
+  return (req: Request, res: Response, next: NextFunction) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const arr = (hits.get(ip) || []).filter(t => now - t < windowMs);
+    if (arr.length >= limit) {
+      return res.status(429).json({
+        error: `Terlalu banyak permintaan ${name}. Coba lagi dalam ${Math.round(windowMs / 60000)} menit.`,
+      });
     }
-  }
-  next();
+    arr.push(now);
+    hits.set(ip, arr);
+    if (hits.size > 1000) {
+      for (const [k, v] of hits) if (!v.some(t => now - t < windowMs)) hits.delete(k);
+    }
+    next();
+  };
 }
+
+export const forgotPasswordRateLimit = ipWindowLimiter('reset password', 5, 15 * 60 * 1000);
+// Register dulunya TANPA limit → bisa mass-create akun + spam email verifikasi Resend.
+// Hitung semua attempt (termasuk payload invalid) — 10/IP/15m.
+export const registerRateLimit = ipWindowLimiter('registrasi', 10, 15 * 60 * 1000);
 
 export function aiRateLimit(endpoint: string, limit: number, windowSec = 60) {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {

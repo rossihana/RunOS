@@ -8,7 +8,7 @@ import { catchAsync } from '../utils/catchAsync.js';
 import { hashPassword, verifyPassword } from '../services/password.js';
 import { createResetToken, resetPassword } from '../services/passwordReset.js';
 import { sendVerificationEmail, verifyEmailToken, sendResetEmail } from '../services/emailTokens.js';
-import { loginRateLimit, loginAttemptFailed, loginAttemptSucceeded, forgotPasswordRateLimit } from '../middleware/rateLimit.js';
+import { loginRateLimit, loginAttemptFailed, loginAttemptSucceeded, forgotPasswordRateLimit, registerRateLimit } from '../middleware/rateLimit.js';
 
 const router = Router();
 const JWT_SECRET = env.JWT_SECRET;
@@ -36,7 +36,7 @@ router.get('/config', (req: Request, res: Response) => {
   res.json({ inviteRequired: !!env.INVITE_CODE });
 });
 
-router.post('/register', catchAsync(async (req: Request, res: Response) => {
+router.post('/register', registerRateLimit, catchAsync(async (req: Request, res: Response) => {
   // Registrasi terbuka kecuali INVITE_CODE diset — kalau diset, wajib cocok (S1)
   const { email, password, name, inviteCode } = req.body || {};
   if (env.INVITE_CODE) {
