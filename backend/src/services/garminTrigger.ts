@@ -15,9 +15,11 @@ import { env } from '../config/env.js';
  */
 
 const SYNC_SECRET = env.SYNC_SECRET || '';
-const VENV_PY = 'D:/tools/garmin-hermes/Scripts/python.exe';
-const SCRIPT = 'D:/PROJECT/RunOS/scripts/garmin_sync.py';
-const LOG = 'D:/PROJECT/RunOS/backend/tmp/sync.log';
+// ponytail: default = venv Windows utk dev lokal; server isi env GARMIN_PYTHON/GARMIN_SCRIPT/GARMIN_TMP
+// (Docker Linux: GARMIN_PYTHON=/opt/venv/bin/python GARMIN_SCRIPT=/app/scripts/garmin_sync.py GARMIN_TMP=/tmp/runos).
+const VENV_PY = process.env.GARMIN_PYTHON || 'D:/tools/garmin-hermes/Scripts/python.exe';
+const SCRIPT = process.env.GARMIN_SCRIPT || 'D:/PROJECT/RunOS/scripts/garmin_sync.py';
+const LOG = process.env.GARMIN_LOG || 'D:/PROJECT/RunOS/backend/tmp/sync.log';
 
 let running = false; // satu sync pada satu waktu per instance (Garmin rate-limit)
 let lastResult: { startedAt: string; status: string; detail?: string } | null = null;
@@ -38,7 +40,7 @@ export async function runGarminSync(days?: number, details = false): Promise<voi
   if (details) args.push('--details', '--max-detail', '30');
   const child = require('child_process').spawn(VENV_PY, args, {
     windowsHide: true,
-    cwd: 'D:/PROJECT/RunOS/scripts',
+    cwd: require('path').dirname(SCRIPT),
   });
   let out = '';
   child.stdout?.on('data', (d: Buffer) => { out += d; });

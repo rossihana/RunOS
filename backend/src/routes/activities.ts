@@ -307,6 +307,31 @@ router.get('/garmin/status', authenticate, catchAsync(async (req: AuthRequest, r
   return m.statusHandler(req, res);
 }));
 
+// ─── Internal: DIPAKAI GitHub Actions mode=verify (auth: X-Sync-Secret, timing-safe) ───
+// /internal-creds        → workflow ambil kredensial terdekripsi (password TIDAK PERNAH
+//                          jadi input Actions / muncul di log — repo ini publik).
+// /internal-verify-result → callback hasil login: ok → tandai terverifikasi; gagal → hapus.
+router.post('/garmin/internal-creds', catchAsync(async (req: Request, res: Response) => {
+  const { syncAuthorized } = await import('../services/garminTrigger.js');
+  if (!syncAuthorized(req)) return res.status(403).json({ error: 'forbidden' });
+  const m = await import('../services/garminPerUser.js');
+  const creds = await m.loadCredentials(Number(req.body?.user_id));
+  if (!creds) return res.status(404).json({ error: 'kredensial tidak ada' });
+  res.set('Cache-Control', 'no-store');
+  res.json(creds);
+}));
+
+router.post('/garmin/internal-verify-result', catchAsync(async (req: Request, res: Response) => {
+  const { syncAuthorized } = await import('../services/garminTrigger.js');
+  if (!syncAuthorized(req)) return res.status(403).json({ error: 'forbidden' });
+  const userId = Number(req.body?.user_id);
+  if (!Number.isInteger(userId) || userId <= 0) return res.status(400).json({ error: 'user_id tidak valid' });
+  const ok = req.body?.ok === true || req.body?.ok === 'true';
+  const m = await import('../services/garminPerUser.js');
+  await m.applyVerifyResult(userId, ok);
+  res.json({ ok: true });
+}));
+
 // ─── Legacy owner sync (SYNC_SECRET) — dipakai cron harian owner ───
 // Sekarang cron memicu sync SEMUA user terhubung (S7), bukan hanya owner.
 

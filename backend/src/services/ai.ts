@@ -7,6 +7,28 @@ const openai = new OpenAI({
   baseURL: env.NINEROUTER_BASE_URL,
   timeout: 60_000,     // failover cepat ke model fallback kalau channel lambat/mati
   maxRetries: 0,
+  // Endpoint resmi Google (OpenAI-compat) minta nama model polos ("gemini-3.8-flash");
+  //9router memakai alias "provider/model" ("gemini/gemini-3.8-flash"). Normalisasi di
+  // custom fetch SATU TITIK → semua panggilan (termasuk stream & tool-call) ikut.
+  // Free-catalog non-owner ("kios-ai/...", "b-ai/...") tak ada di Gemini → diganti flash-latest.
+  ...(env.NINEROUTER_BASE_URL.includes('generativelanguage.googleapis.com')
+    ? {
+        fetch: (url: any, init: any = {}) => {
+          let body = init.body;
+          if (typeof body === 'string') {
+            try {
+              const j = JSON.parse(body);
+              if (j?.model) {
+                const bare = String(j.model).includes('/') ? String(j.model).slice(String(j.model).lastIndexOf('/') + 1) : String(j.model);
+                j.model = bare.startsWith('gemini-') ? bare : 'gemini-flash-latest';
+                body = JSON.stringify(j);
+              }
+            } catch { /* body bukan JSON → biarkan apa adanya */ }
+          }
+          return fetch(url, { ...init, body });
+        },
+      }
+    : {}),
 });
 export { openai };
 

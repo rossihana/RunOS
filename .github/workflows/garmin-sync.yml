@@ -1,0 +1,100 @@
+# Sync/verify Garmin lewat GitHub Actions — dipanggil backend (Vercel) via workflow_dispatch.
+# Alasan: serverless tak bisa spawn Python; runner GitHub gratis utk repo publik.
+# Serial (concurrency group): Garmin menolak login paralel. Token login di-cache antar run.
+name: garmin-sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [sync, verify]
+        default: sync
+        required: true
+      user_id:
+        type: string
+        required: false
+        default: ""
+      days:
+        type: string
+        required: false
+        default: ""
+      details:
+        type: boolean
+        default: false
+      health:
+        type: boolean
+        default: true
+
+concurrency:
+  group: garmin-serial # sync & verify SEMUA antri satu per satu (anti 429)
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependensi
+        run: pip install -q garminconnect==0.3.2 psycopg2-binary==2.9.12
+
+      - name: Ambil kredensial dari backend
+        env:
+          API: ${{ secrets.RUNOS_API_URL }}
+          SECRET: ${{ secrets.RUNOS_SYNC_SECRET }}
+          USER_ID: ${{ inputs.user_id }}
+        run: |
+          resp=$(curl -sf -X POST "$API/api/activities/garmin/internal-creds" \
+            -H 'Content-Type: application/json' -H "X-Sync-Secret: $SECRET" \
+            -d "{\"user_id\":$USER_ID}")
+          email=$(jq -r '.email // empty' <<<"$resp")
+          pw=$(jq -r '.password // empty' <<<"$resp")
+          if [ -z "$email" ] || [ -z "$pw" ]; then echo "Kredensial tidak ditemukan: $resp"; exit 1; fi
+          echo "::add-mask::$email"
+          echo "::add-mask::$pw"
+          { echo "GARMIN_EMAIL=$email"; echo "GARMIN_PASSWORD=$pw"; } >> "$GITHUB_ENV"
+
+      - name: Cache tokenstore (anti login ulang / 429)
+        if: inputs.mode == 'sync'
+        uses: actions/cache@v4
+        with:
+          path: tokenstore
+          key: garmin-token-${{ inputs.user_id }}
+          restore-keys: garmin-token-
+
+      - name: Verifikasi kredensial (mode verify)
+        id: verify
+        if: inputs.mode == 'verify'
+        env:
+          GARMIN_TOKENSTORE_DIR: ${{ github.workspace }}/tokenstore-verify
+        run: python scripts/garmin_sync.py --verify-only
+
+      - name: Sync data (mode sync)
+        if: inputs.mode == 'sync'
+        env:
+          DATABASE_URL: ${{ secrets.RUNOS_DATABASE_URL }}
+          GARMIN_TOKENSTORE_DIR: ${{ github.workspace }}/tokenstore
+        run: |
+          extra=""
+          [ -n "${{ inputs.days }}" ] && extra="--days ${{ inputs.days }}"
+          [ "${{ inputs.details }}" = "true" ] && extra="$extra --details --max-detail 30"
+          [ "${{ inputs.health }}" = "true" ] && extra="$extra --health"
+          python scripts/garmin_sync.py --user-id "${{ inputs.user_id }}" $extra
+
+      # Callback ke backend: ok → garmin_connected_at=now(); gagal → kredensial dihapus (BUG-6).
+      - name: Laporkan hasil verifikasi
+        if: always() && inputs.mode == 'verify' && steps.verify.outcome != 'skipped'
+        env:
+          API: ${{ secrets.RUNOS_API_URL }}
+          SECRET: ${{ secrets.RUNOS_SYNC_SECRET }}
+          USER_ID: ${{ inputs.user_id }}
+          OUTCOME: ${{ steps.verify.outcome }}
+        run: |
+          ok=false; [ "$OUTCOME" = "success" ] && ok=true
+          curl -sS -X POST "$API/api/activities/garmin/internal-verify-result" \
+            -H 'Content-Type: application/json' -H "X-Sync-Secret: $SECRET" \
+            -d "{\"user_id\":$USER_ID,\"ok\":$ok}" || echo "callback gagal (dicek ulang oleh backend via timeout poll)"

@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import fs from 'fs';
+import path from 'path';
 import authRoutes from './src/routes/auth.js';
 import activitiesRoutes from './src/routes/activities.js';
 import racesRoutes from './src/routes/races.js';
@@ -60,6 +62,19 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// Serve frontend build — deploy single-domain (Render/CF): /api = Express, sisanya SPA.
+// ponytail: dist tak ada (dev lokal: vite terpisah, cwd=backend/) → blok dilewati otomatis.
+const distDir = path.resolve(process.cwd(), 'frontend/dist');
+if (fs.existsSync(path.join(distDir, 'index.html'))) {
+  app.use(express.static(distDir));
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      return res.sendFile(path.join(distDir, 'index.html'));
+    }
+    next();
+  });
+}
+
 // Global Error Handler - must be defined last
 app.use(globalErrorHandler);
 
@@ -67,7 +82,9 @@ export default app;
 
 // In local development, start the server
 // Vercel sets the VERCEL environment variable, so this won't run on Vercel
-if (!process.env.VERCEL && process.env.NODE_ENV !== 'production') {
+// ponytail: dulu NODE_ENV=production = TIDAK listen (khusus Vercel) → deploy di PaaS (Render/dsb)
+// jadi diam. Sekarang: listen selama bukan serverless; PORT diisi platform (Render: PORT=10000).
+if (!process.env.VERCEL) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

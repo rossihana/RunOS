@@ -1,9 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { spawn } from 'child_process';
+import path from 'path';
 import fs from 'fs';
 import { query } from '../db.js';
 import { decrypt } from './crypto.js';
+import { ghEnabled, dispatchWorkflow, latestRunStatus } from './githubActions.js';
 
 /**
  * S7 Opsi A: sync Garmin PER USER.
@@ -11,12 +13,15 @@ import { decrypt } from './crypto.js';
  * - Trigger: POST /api/activities/garmin/connect (simpan kred) dan /garmin/sync (jalankan, via JWT).
  * - Antrean global: satu proses sync pada satu waktu (Garmin membenci login paralel).
  * - Script menerima env GARMIN_EMAIL/GARMIN_PASSWORD + GARMIN_TOKENSTORE per user.
+ * Serverless (GITHUB_SYNC_PAT terisi): sync & verify dijalankan GitHub Actions
+ * (workflow_dispatch) — Vercel tak bisa spawn Python; lokal tetap spawn venv Windows.
  * ponytail: antrean in-memory (single process lokal); pindah ke DB queue saat multi-instance.
  */
 
-const VENV_PY = 'D:/tools/garmin-hermes/Scripts/python.exe';
-const SCRIPT = 'D:/PROJECT/RunOS/scripts/garmin_sync.py';
-const LOG_DIR = 'D:/PROJECT/RunOS/backend/tmp';
+// ponytail: default = venv Windows utk dev lokal; server isi env GARMIN_PYTHON/GARMIN_SCRIPT/GARMIN_TMP.
+const VENV_PY = process.env.GARMIN_PYTHON || 'D:/tools/garmin-hermes/Scripts/python.exe';
+const SCRIPT = process.env.GARMIN_SCRIPT || 'D:/PROJECT/RunOS/scripts/garmin_sync.py';
+const LOG_DIR = process.env.GARMIN_TMP || 'D:/PROJECT/RunOS/backend/tmp';
 
 let running = false;
 
@@ -35,21 +40,36 @@ export async function garminConnected(userId: number): Promise<boolean> {
   return !!r.rows[0]?.connected;
 }
 
-/** Simpan kredensial Garmin user (password dienkripsi). */
-export async function saveGarminCredentials(userId: number, email: string, password: string): Promise<void> {
+/** Simpan kredensial Garmin user (password dienkripsi).
+ *  verified=false → garmin_connected_at NULL dulu (jalur serverless: menunggu callback
+ *  verifikasi GitHub Actions; BUG-6 terhubung palsu tetap terjaga). */
+export async function saveGarminCredentials(userId: number, email: string, password: string, verified = true): Promise<void> {
   const { encrypt } = await import('./crypto.js');
   await query(
-    `UPDATE users SET garmin_email = $1, garmin_password_enc = $2, garmin_connected_at = now() WHERE id = $3`,
-    [email.trim().toLowerCase(), encrypt(password), userId]
+    `UPDATE users SET garmin_email = $1, garmin_password_enc = $2,
+       garmin_connected_at = CASE WHEN $4::boolean THEN now() ELSE NULL END
+     WHERE id = $3`,
+    [email.trim().toLowerCase(), encrypt(password), userId, verified]
   );
 }
 
 /** Ambil & dekripsi kredensial user. */
-async function loadCredentials(userId: number): Promise<{ email: string; password: string } | null> {
+export async function loadCredentials(userId: number): Promise<{ email: string; password: string } | null> {
+  if (!Number.isInteger(userId) || userId <= 0) return null;
   const r = await query('SELECT garmin_email, garmin_password_enc FROM users WHERE id = $1', [userId]);
   const row = r.rows[0];
   if (!row?.garmin_email || !row?.garmin_password_enc) return null;
   return { email: row.garmin_email, password: decrypt(row.garmin_password_enc) };
+}
+
+/** Callback workflow Actions mode=verify: login valid → tandai terverifikasi; gagal → hapus kredensial. */
+export async function applyVerifyResult(userId: number, ok: boolean): Promise<void> {
+  if (!Number.isInteger(userId) || userId <= 0) return;
+  if (ok) {
+    await query(`UPDATE users SET garmin_connected_at = now() WHERE id = $1 AND garmin_email IS NOT NULL`, [userId]);
+  } else {
+    await query(`UPDATE users SET garmin_email = NULL, garmin_password_enc = NULL, garmin_connected_at = NULL WHERE id = $1`, [userId]);
+  }
 }
 
 function runPython(userId: number, args: string[], env: Record<string, string>) {
@@ -57,7 +77,7 @@ function runPython(userId: number, args: string[], env: Record<string, string>) 
     const logFile = `${LOG_DIR}/sync_user_${userId}.log`;
     const child = spawn(VENV_PY, [SCRIPT, ...args], {
       windowsHide: true,
-      cwd: 'D:/PROJECT/RunOS/scripts',
+      cwd: path.dirname(SCRIPT),
       env: { ...process.env, ...env, GARMIN_TOKENSTORE_DIR: `${LOG_DIR}/tokens/${userId}` },
     });
     let out = '';
@@ -86,6 +106,21 @@ export function clampDays(d?: number): number | undefined {
 /** Entri utama: jalankan sync untuk satu user (diantrekan global). */
 export function queueSync(userId: number, days?: number, details = false, health = false): void {
   days = clampDays(days);
+  // Serverless: dispatch ke GitHub Actions (async). Status polling frontend tetap jalan —
+  // statusHandler serverless membaca run GitHub (stateless), memori di sini hanya hint lokal.
+  if (ghEnabled()) {
+    lastByUser.set(userId, { userId, startedAt: new Date().toISOString(), status: 'running' });
+    dispatchWorkflow({
+      mode: 'sync',
+      user_id: String(userId),
+      days: days ? String(days) : '',
+      details: String(details),
+      health: String(health),
+    }).catch((e) =>
+      lastByUser.set(userId, { userId, startedAt: new Date().toISOString(), status: 'failed', detail: String(e?.message || e) })
+    );
+    return;
+  }
   if (!queue.includes(userId)) queue.push(userId);
   lastByUser.set(userId, { userId, startedAt: new Date().toISOString(), status: 'running' });
   processQueue(days, details, health);
@@ -140,7 +175,7 @@ async function verifyGarminCredentials(email: string, password: string): Promise
   return new Promise((resolve) => {
     const child = spawn(VENV_PY, [SCRIPT, '--verify-only'], {
       windowsHide: true,
-      cwd: 'D:/PROJECT/RunOS/scripts',
+      cwd: path.dirname(SCRIPT),
       env: {
         ...process.env,
         GARMIN_EMAIL: email,
@@ -178,6 +213,35 @@ export async function connectHandler(req: Request, res: Response) {
   if (typeof password !== 'string' || password.length < 4) {
     return res.status(400).json({ error: 'Password Garmin tidak valid' });
   }
+  // Serverless: verifikasi via GitHub Actions (mode=verify). Simpan dulu TANPA connected_at,
+  // poll DB ≤150 dtk sampai callback /internal-verify-result memutuskan — BUG-6 tetap terjaga
+  // (connected hanya setelah login valid). Ponytail: timeout 150 dtk < limit Vercel 300 dtk.
+  if (ghEnabled()) {
+    try {
+      await saveGarminCredentials(userId, email, password, false);
+      await query(`UPDATE users SET terms_accepted_at = now(), terms_version = $1 WHERE id = $2`, [TERMS_VERSION, userId]);
+      await dispatchWorkflow({ mode: 'verify', user_id: String(userId) });
+    } catch (e: any) {
+      await query(`UPDATE users SET garmin_email = NULL, garmin_password_enc = NULL, garmin_connected_at = NULL WHERE id = $1`, [userId]);
+      return res.status(500).json({ error: `Gagal memicu verifikasi: ${String(e?.message || e).slice(0, 200)}` });
+    }
+    const deadline = Date.now() + 150_000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const c = await query('SELECT garmin_email, garmin_connected_at FROM users WHERE id = $1', [userId]);
+      const row = c.rows[0];
+      if (row?.garmin_connected_at) {
+        return res.json({ success: true, message: 'Kredensial Garmin valid & tersimpan terenkripsi. Silakan sync.' });
+      }
+      if (!row?.garmin_email) {
+        return res.status(400).json({ error: 'Email atau password Garmin salah (atau Garmin menolak login).' });
+      }
+    }
+    return res.status(202).json({
+      success: true,
+      message: 'Verifikasi masih berjalan di antrean GitHub — kalau kredensial salah, sync pertama akan gagal.',
+    });
+  }
   // BUG-6 fix: kredensial diverifikasi ke Garmin SEBELUM disimpan — tidak ada lagi "terhubung palsu"
   const v = await verifyGarminCredentials(email.trim().toLowerCase(), password);
   if (!v.ok) {
@@ -194,7 +258,11 @@ export async function connectHandler(req: Request, res: Response) {
 
 /** Handler: status sync user (JWT auth). */
 export async function statusHandler(req: Request, res: Response) {
-  res.json({ status: syncStatusFor((req as any).user?.id), connected: await garminConnected((req as any).user?.id) });
+  const userId = (req as any).user?.id;
+  // Serverless: memori antar-invoke hilang → status diambil dari run GitHub Actions (stateless),
+  // sehingga polling Dashboard tetap menerima running/done/failed.
+  const status = ghEnabled() ? await latestRunStatus() : syncStatusFor(userId);
+  res.json({ status, connected: await garminConnected(userId) });
 }
 
 // Legacy export dibiarkan agar import lama tidak rusak
