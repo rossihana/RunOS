@@ -315,6 +315,14 @@ router.post('/garmin/internal-creds', catchAsync(async (req: Request, res: Respo
   const { syncAuthorized } = await import('../services/garminTrigger.js');
   if (!syncAuthorized(req)) return res.status(403).json({ error: 'forbidden' });
   const m = await import('../services/garminPerUser.js');
+  // {"list":true} → daftar user terhubung (dipakai workflow mode=schedule / cron 07:00 WIB)
+  if (req.body?.list === true || req.body?.list === 'true') {
+    const r = await query(
+      `SELECT id FROM users WHERE garmin_email IS NOT NULL AND garmin_connected_at IS NOT NULL ORDER BY id`
+    );
+    res.set('Cache-Control', 'no-store');
+    return res.json({ user_ids: r.rows.map((x: any) => x.id) });
+  }
   const creds = await m.loadCredentials(Number(req.body?.user_id));
   if (!creds) return res.status(404).json({ error: 'kredensial tidak ada' });
   res.set('Cache-Control', 'no-store');

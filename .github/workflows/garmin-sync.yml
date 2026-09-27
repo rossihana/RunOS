@@ -1,6 +1,8 @@
-# Sync/verify Garmin lewat GitHub Actions — dipanggil backend (Vercel) via workflow_dispatch.
+# Sync/verify Garmin lewat GitHub Actions — dipanggil backend (Vercel) via workflow_dispatch,
+# plus jadwal harian 07:00 WIB (00:00 UTC) sebagai pengganti cron lokal yang di-pause.
 # Alasan: serverless tak bisa spawn Python; runner GitHub gratis utk repo publik.
-# Serial (concurrency group): Garmin menolak login paralel. Token login di-cache antar run.
+# Serial (concurrency group): Garmin menolak login paralel → semua run antre 1 per 1.
+# Token login di-cache antar run (anti 429 login berulang).
 name: garmin-sync
 
 on:
@@ -8,7 +10,7 @@ on:
     inputs:
       mode:
         type: choice
-        options: [sync, verify]
+        options: [sync, verify, schedule]
         default: sync
         required: true
       user_id:
@@ -25,24 +27,36 @@ on:
       health:
         type: boolean
         default: true
+  schedule:
+    - cron: "0 0 * * *" # 00:00 UTC = 07:00 WIB
 
 concurrency:
-  group: garmin-serial # sync & verify SEMUA antri satu per satu (anti 429)
+  group: garmin-serial
   cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      # schedule tak punya inputs → normalisasi sekali, dipakai semua if di bawah
+      - name: Normalisasi mode
+        id: mode
+        run: echo "mode=${{ github.event_name == 'schedule' && 'schedule' || inputs.mode }}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Install dependensi
         run: pip install -q garminconnect==0.3.2 psycopg2-binary==2.9.12
 
+      # --- kredensial utk dispatch (verify/sync per user) ---
       - name: Ambil kredensial dari backend
+        id: creds
+        if: steps.mode.outputs.mode != 'schedule'
         env:
           API: ${{ secrets.RUNOS_API_URL }}
           SECRET: ${{ secrets.RUNOS_SYNC_SECRET }}
@@ -50,7 +64,7 @@ jobs:
         run: |
           resp=$(curl -sf -X POST "$API/api/activities/garmin/internal-creds" \
             -H 'Content-Type: application/json' -H "X-Sync-Secret: $SECRET" \
-            -d "{\"user_id\":$USER_ID}")
+            -d "{\"user_id\": $USER_ID}")
           email=$(jq -r '.email // empty' <<<"$resp")
           pw=$(jq -r '.password // empty' <<<"$resp")
           if [ -z "$email" ] || [ -z "$pw" ]; then echo "Kredensial tidak ditemukan: $resp"; exit 1; fi
@@ -58,23 +72,34 @@ jobs:
           echo "::add-mask::$pw"
           { echo "GARMIN_EMAIL=$email"; echo "GARMIN_PASSWORD=$pw"; } >> "$GITHUB_ENV"
 
-      - name: Cache tokenstore (anti login ulang / 429)
-        if: inputs.mode == 'sync'
+      - name: Cache tokenstore (dispatch)
+        if: steps.mode.outputs.mode != 'schedule'
         uses: actions/cache@v4
         with:
           path: tokenstore
           key: garmin-token-${{ inputs.user_id }}
-          restore-keys: garmin-token-
+          restore-keys: |
+            garmin-token-
+
+      # jadwal: semua user dalam satu run → cache seluruh pohon tstore/ antar run
+      - name: Cache tokenstore (jadwal)
+        if: steps.mode.outputs.mode == 'schedule'
+        uses: actions/cache@v4
+        with:
+          path: tstore
+          key: garmin-token-sched-${{ github.run_id }}
+          restore-keys: |
+            garmin-token-sched-
 
       - name: Verifikasi kredensial (mode verify)
         id: verify
-        if: inputs.mode == 'verify'
+        if: steps.mode.outputs.mode == 'verify'
         env:
           GARMIN_TOKENSTORE_DIR: ${{ github.workspace }}/tokenstore-verify
         run: python scripts/garmin_sync.py --verify-only
 
       - name: Sync data (mode sync)
-        if: inputs.mode == 'sync'
+        if: steps.mode.outputs.mode == 'sync'
         env:
           DATABASE_URL: ${{ secrets.RUNOS_DATABASE_URL }}
           GARMIN_TOKENSTORE_DIR: ${{ github.workspace }}/tokenstore
@@ -85,9 +110,34 @@ jobs:
           [ "${{ inputs.health }}" = "true" ] && extra="$extra --health"
           python scripts/garmin_sync.py --user-id "${{ inputs.user_id }}" $extra
 
-      # Callback ke backend: ok → garmin_connected_at=now(); gagal → kredensial dihapus (BUG-6).
-      - name: Laporkan hasil verifikasi
-        if: always() && inputs.mode == 'verify' && steps.verify.outcome != 'skipped'
+      # --- jadwal harian: loop serial semua user terhubung (1 login pada 1 waktu) ---
+      - name: Sync semua user terhubung (jadwal 07:00 WIB)
+        if: steps.mode.outputs.mode == 'schedule'
+        env:
+          API: ${{ secrets.RUNOS_API_URL }}
+          SECRET: ${{ secrets.RUNOS_SYNC_SECRET }}
+          DATABASE_URL: ${{ secrets.RUNOS_DATABASE_URL }}
+        run: |
+          ids=$(curl -sf -X POST "$API/api/activities/garmin/internal-creds" \
+            -H 'Content-Type: application/json' -H "X-Sync-Secret: $SECRET" \
+            -d '{"list":true}' | jq -r '.user_ids // [] | .[]')
+          if [ -z "$ids" ]; then echo "Tidak ada user terhubung — selesai."; exit 0; fi
+          failed=0
+          for uid in $ids; do
+            resp=$(curl -sf -X POST "$API/api/activities/garmin/internal-creds" \
+              -H 'Content-Type: application/json' -H "X-Sync-Secret: $SECRET" \
+              -d "{\"user_id\":$uid}") || { echo "user $uid: gagal ambil kredensial"; failed=1; continue; }
+            email=$(jq -r '.email // empty' <<<"$resp"); pw=$(jq -r '.password // empty' <<<"$resp")
+            echo "::add-mask::$email"; echo "::add-mask::$pw"
+            GARMIN_EMAIL=$email GARMIN_PASSWORD=$pw \
+            GARMIN_TOKENSTORE_DIR="$GITHUB_WORKSPACE/tstore/$uid" \
+              python scripts/garmin_sync.py --user-id "$uid" --days 7 --details --max-detail 30 --health \
+              || failed=1
+          done
+          exit $failed
+
+      - name: Laporkan hasil verifikasi ke backend
+        if: always() && steps.mode.outputs.mode == 'verify' && steps.verify.outcome != 'skipped'
         env:
           API: ${{ secrets.RUNOS_API_URL }}
           SECRET: ${{ secrets.RUNOS_SYNC_SECRET }}
@@ -97,4 +147,4 @@ jobs:
           ok=false; [ "$OUTCOME" = "success" ] && ok=true
           curl -sS -X POST "$API/api/activities/garmin/internal-verify-result" \
             -H 'Content-Type: application/json' -H "X-Sync-Secret: $SECRET" \
-            -d "{\"user_id\":$USER_ID,\"ok\":$ok}" || echo "callback gagal (dicek ulang oleh backend via timeout poll)"
+            -d "{\"user_id\":$USER_ID,\"ok\":$ok}" || true
