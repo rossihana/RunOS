@@ -98,21 +98,27 @@ router.get('/lab', authenticate, async (req: AuthRequest, res) => {
     let healthRow: any = null;
     let garminHealthSeries: Array<{ date: string; hrv: number | null; sleep: number | null; vo2max: number | null; rhr: number | null; stress: number | null }> = [];
     try {
-      const hRes = await query(
-        `SELECT hrv_ms, sleep_score, readiness_score, vo2max_garmin, pred_5k_s, pred_10k_s, pred_hm_s, pred_fm_s FROM health_daily WHERE user_id = $1 ORDER BY date DESC LIMIT 1`,
-        [userId]
-      );
-      if (hRes.rows.length > 0) {
-        const h = hRes.rows[0];
-        healthRow = h;
-        garminHealth = { hrv: h.hrv_ms, sleep: h.sleep_score, readiness: h.readiness_score, vo2max: h.vo2max_garmin };
-      }
-      // Trend 30 hari terakhir untuk chart HRV/Sleep/VO2max
+      // Satu query utk kartu + prediksi + seri 30 hari. Baris hari-ini sering masih
+      // null penuh (Garmin memproses tidur/HRV semalam belakangan) → kartu pakai
+      // nilai non-null TERAKHIR per metrik, bukan baris terbaru.
       const sRes = await query(
-        `SELECT date, hrv_ms, sleep_score, vo2max_garmin, rhr, (raw->>'stress')::float AS stress FROM health_daily WHERE user_id = $1 ORDER BY date DESC LIMIT 30`,
+        `SELECT date, hrv_ms, sleep_score, readiness_score, vo2max_garmin, pred_5k_s, pred_10k_s, pred_hm_s, pred_fm_s, rhr, (raw->>'stress')::float AS stress
+         FROM health_daily WHERE user_id = $1 ORDER BY date DESC LIMIT 30`,
         [userId]
       );
-      garminHealthSeries = sRes.rows.reverse().map((r: any) => {
+      const rowsAsc = sRes.rows.slice().reverse();
+      const lastNum = (k: string): number | null => {
+        for (let i = rowsAsc.length - 1; i >= 0; i--) { const v = rowsAsc[i][k]; if (v != null) return v; }
+        return null;
+      };
+      if (rowsAsc.length > 0) {
+        healthRow = {
+          pred_5k_s: lastNum('pred_5k_s'), pred_10k_s: lastNum('pred_10k_s'),
+          pred_hm_s: lastNum('pred_hm_s'), pred_fm_s: lastNum('pred_fm_s'),
+        };
+        garminHealth = { hrv: lastNum('hrv_ms'), sleep: lastNum('sleep_score'), readiness: lastNum('readiness_score'), vo2max: lastNum('vo2max_garmin') };
+      }
+      garminHealthSeries = rowsAsc.map((r: any) => {
         // pg mengembalikan DATE sebagai objek Date — format manual ke YYYY-MM-DD
         const dt: Date = r.date instanceof Date ? r.date : new Date(r.date);
         const date = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
@@ -188,9 +194,14 @@ router.get('/lab', authenticate, async (req: AuthRequest, res) => {
       const hrvComp = hrv7.length >= 3 && hrvBase.length >= 7
         ? Math.max(0, Math.min(100, 50 + ((avg(hrv7) - avg(hrvBase)) / avg(hrvBase)) * 200))
         : null;
-      const latest = garminHealthSeries[garminHealthSeries.length - 1];
-      const sleepComp = latest?.sleep ?? null;
-      const stressComp = latest?.stress != null ? Math.max(0, Math.min(100, 100 - latest.stress)) : null;
+      // Baris terakhir bisa null (hari-ini belum diproses Garmin) → cari mundur
+      const lastNonNull = (pick: (r: any) => any): any => {
+        for (let i = garminHealthSeries.length - 1; i >= 0; i--) { const v = pick(garminHealthSeries[i]); if (v != null) return v; }
+        return null;
+      };
+      const sleepComp = lastNonNull(r => r.sleep);
+      const stressVal = lastNonNull(r => r.stress);
+      const stressComp = stressVal != null ? Math.max(0, Math.min(100, 100 - stressVal)) : null;
       // Recovery: jam sejak akhir aktivitas terakhir vs kebutuhan pulih (12 + 6×jam_lari, cap 48 jam)
       let lastEnd = 0, lastMovingH = 0;
       for (const a of activities) {
