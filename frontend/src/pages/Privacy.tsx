@@ -28,19 +28,11 @@ export default function Privacy() {
           <li className={li}>Kredensial Garmin hanya dipakai server untuk login sesi sync — tidak dipakai untuk mengubah apa pun di akun Garmin-mu (read-only).</li>
         </ul>
 
-        <h2 className={h2}>3. Pemroses Data (Infrastruktur)</h2>
-        <p className={p}>Untuk menjalankan layanan, data diproses oleh penyedia berikut:</p>
-        <ul className="space-y-1 mb-2">
-          <li className={li}><b>Supabase</b> — database PostgreSQL tempat data aktivitas disimpan.</li>
-          <li className={li}><b>Vercel</b> — hosting backend (API server).</li>
-          <li className={li}><b>Cloudflare</b> — hosting frontend, DNS, dan sertifikat HTTPS.</li>
-          <li className={li}><b>GitHub Actions</b> — menjalankan proses sinkronisasi Garmin terjadwal. Kredensial Garmin dilewatkan sesaat ke proses ini dan <b>disamarkan otomatis di log</b>; token sesi disimpan terenkripsi pada cache build.</li>
-          <li className={li}><b>Resend</b> — pengiriman email transaksional (verifikasi, reset password).</li>
-          <li className={li}><b>Google Gemini</b> — memproses teks saran AI (ringkasan data + chat; tanpa password).</li>
-        </ul>
+        <h2 className={h2}>3. Pemroses Data</h2>
+        <p className={p}>Untuk menjalankan layanan, data diproses oleh penyedia infrastruktur tepercaya (hosting, database, email transaksional, dan model AI) yang terikat perjanjian kerahasiaan dan hanya memproses data atas instruksi kami. Kami tidak menjual data; detail infrastruktur internal tidak kami umumkan demi keamanan layanan. Kredensial yang dilewatkan ke proses sinkronisasi otomatis <b>disamarkan pada log</b> dan disimpan terenkripsi.</p>
 
         <h2 className={h2}>4. AI & Provider Eksternal</h2>
-        <p className={p}>Saran AI dihasilkan oleh model eksternal (default: Google Gemini). Untuk menghasilkan jawaban, RunOS mengirim ringkasan data lari dan isi chat-mu ke provider model tersebut. Konten yang dikirim tidak memuat password-mu. Jika kamu memakai model custom dengan API key sendiri (BYOK), request langsung ke provider pilihanmu di luar kendali RunOS.</p>
+        <p className={p}>Saran AI dihasilkan oleh model eksternal. Untuk menghasilkan jawaban, RunOS mengirim ringkasan data lari dan isi chat-mu ke provider model tersebut. Konten yang dikirim tidak memuat password-mu. Jika kamu memakai model custom dengan API key sendiri (BYOK), request langsung ke provider pilihanmu di luar kendali RunOS.</p>
 
         <h2 className={h2}>5. Cookies & Penyimpanan Lokal</h2>
         <ul className="space-y-1 mb-2">
@@ -52,7 +44,7 @@ export default function Privacy() {
         <h2 className={h2}>6. Penyimpanan & Keamanan</h2>
         <ul className="space-y-1 mb-2">
           <li className={li}>Password RunOS: hash scrypt. Password Garmin: AES-256-GCM terenkripsi, kunci enkripsi disimpan terpisah dari database.</li>
-          <li className={li}>Sesi sync Garmin per-user terisolasi (token per user, tidak bercampur); log build disamarkan untuk kredensial.</li>
+          <li className={li}>Sesi sync Garmin per-user terisolasi (token per user, tidak bercampur); log proses sinkronisasi disamarkan untuk kredensial.</li>
           <li className={li}>Koneksi seluruh layanan menggunakan HTTPS/TLS.</li>
           <li className={li}>Kami tidak bisa dan tidak akan menampilkan password Garmin-mu kembali — kalau lupa, cukup disconnect lalu reconnect.</li>
           <li className={li}>Tidak ada sistem yang 100% aman; kami berupaya memperbaiki kerentanan secepatnya bila ditemukan.</li>
@@ -72,7 +64,7 @@ export default function Privacy() {
         <p className={p}>RunOS tidak ditujukan untuk anak di bawah 13 tahun (atau batas usia minimal sesuai hukum wilayahmu). Jika kami mengetahui data anak dikumpulkan tanpa izin yang diperlukan, data tersebut akan dihapus.</p>
 
         <h2 className={h2}>10. Transfer Data Internasional</h2>
-        <p className={p}>Penyedia infrastruktur kami beroperasi lintas negara (mis. database di Asia Timur, backend & runner di Amerika Serikat/Eropa). Dengan menggunakan RunOS, kamu memahami bahwa data diproses di pusat data penyedia tersebut sesuai kebijakan privasi masing-masing.</p>
+        <p className={p}>Prosesor kami beroperasi di berbagai negara. Dengan menggunakan RunOS, kamu memahami bahwa data dapat diproses di luar negara tempatmu tinggal, sesuai kebijakan privasi masing-masing penyedia.</p>
 
         <h2 className={h2}>11. Perubahan Kebijakan</h2>
         <p className={p}>Versi terkini selalu ada di halaman ini. Perubahan material akan diminta persetujuan ulang.</p>

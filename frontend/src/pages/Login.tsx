@@ -25,6 +25,7 @@ export default function Login() {
   const [newPassword, setNewPassword] = useState('');
   // Invite field hanya muncul kalau server memang menuntut (endpoint publik /auth/config)
   const [envInviteRequired, setEnvInviteRequired] = useState(false);
+  const [acceptTerms, setAcceptTerms] = useState(false);
 
   useEffect(() => {
     api.get('/auth/config')
@@ -40,7 +41,7 @@ export default function Login() {
       const response = await api.post(`/auth/${mode}`, {
         email,
         password,
-        ...(mode === 'register' ? { name, inviteCode: inviteCode || undefined } : {}),
+        ...(mode === 'register' ? { name, inviteCode: inviteCode || undefined, acceptTerms } : {}),
       });
       localStorage.setItem('token', response.data.token);
       // Opsi 2: setelah daftar → onboarding Garmin (bukan dashboard kosong)
@@ -239,6 +240,24 @@ export default function Login() {
               </div>
             </div>
 
+            {mode === 'register' && (
+              <label htmlFor="acceptTerms" className="flex items-start gap-3 text-sm text-zinc-600 dark:text-zinc-400 cursor-pointer select-none">
+                <input
+                  id="acceptTerms"
+                  type="checkbox"
+                  checked={acceptTerms}
+                  onChange={(e) => setAcceptTerms(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-zinc-300 dark:border-zinc-600 text-orange-500 focus:ring-orange-500/20"
+                />
+                <span>
+                  Saya menyetujui{' '}
+                  <a href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-orange-600 dark:text-orange-400 hover:underline">Terms of Service</a>{' '}
+                  dan{' '}
+                  <a href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-orange-600 dark:text-orange-400 hover:underline">Privacy Policy</a>
+                </span>
+              </label>
+            )}
+
             {error && (
               <div className="rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 px-4 py-3 text-sm text-red-600 dark:text-red-400">
                 {error}
@@ -247,7 +266,7 @@ export default function Login() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || (mode === 'register' && !acceptTerms)}
               className="flex w-full justify-center items-center rounded-xl bg-zinc-900 dark:bg-white dark:text-zinc-900 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : mode === 'login' ? 'Masuk' : 'Daftar'}

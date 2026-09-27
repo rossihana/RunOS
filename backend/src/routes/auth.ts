@@ -38,7 +38,7 @@ router.get('/config', (req: Request, res: Response) => {
 
 router.post('/register', registerRateLimit, catchAsync(async (req: Request, res: Response) => {
   // Registrasi terbuka kecuali INVITE_CODE diset — kalau diset, wajib cocok (S1)
-  const { email, password, name, inviteCode } = req.body || {};
+  const { email, password, name, inviteCode, acceptTerms } = req.body || {};
   if (env.INVITE_CODE) {
     if (typeof inviteCode !== 'string' ||
         inviteCode.length !== env.INVITE_CODE.length ||
@@ -54,6 +54,10 @@ router.post('/register', registerRateLimit, catchAsync(async (req: Request, res:
   if (typeof password !== 'string' || password.length < 8) {
     return res.status(400).json({ error: 'Password minimal 8 karakter' });
   }
+  // User agreement (trust boundary): persetujuan ToS & Privacy wajib & dicatat
+  if (acceptTerms !== true) {
+    return res.status(400).json({ error: 'Kamu harus menyetujui Terms of Service & Privacy Policy' });
+  }
 
   const existing = await query('SELECT id FROM users WHERE email = $1', [cleanEmail]);
   if (existing.rows.length > 0) {
@@ -63,8 +67,8 @@ router.post('/register', registerRateLimit, catchAsync(async (req: Request, res:
   const passwordHash = hashPassword(password);
   const [first = '', ...rest] = (typeof name === 'string' ? name.trim() : '').split(' ');
   const result = await query(
-    `INSERT INTO users (email, password_hash, first_name, last_name)
-     VALUES ($1, $2, $3, $4) RETURNING id, email, first_name, last_name`,
+    `INSERT INTO users (email, password_hash, first_name, last_name, terms_accepted_at)
+     VALUES ($1, $2, $3, $4, NOW()) RETURNING id, email, first_name, last_name`,
     [cleanEmail, passwordHash, first || null, rest.join(' ') || null]
   );
   const user = result.rows[0];

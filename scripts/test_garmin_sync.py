@@ -26,7 +26,7 @@ row = map_summary(a)
 assert row[0] == 12345 and row[1] == "Morning Run"
 assert row[3] == 1750.0 and row[4] == 1800.0          # moving, elapsed
 assert row[6] == "5:34", row[6]                        # pace 1000/2.9911 = 334.3s
-assert row[11] == 169                                  # cadence 84.5*2
+assert row[11] == 84                                  # cadence langsung SPM (tanpa *2 sejak 4c66f9c)
 assert row[13] == "2026-09-07 07:30:00"
 
 b = dict(a, averageHR=None, averageRunningCadenceInStepsPerMinute=None, averageSpeed=0)

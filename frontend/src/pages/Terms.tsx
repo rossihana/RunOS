@@ -39,7 +39,7 @@ export default function Terms() {
         </ul>
 
         <h2 className={h2}>5. Saran AI</h2>
-        <p className={p}>Saran pelatihan, prediksi balapan, dan diagnosis dari fitur AI dihasilkan oleh model kecerdasan buatan eksternal (mis. Google Gemini) dan <b>bukan nasihat medis</b>. Selalu konsultasi dengan pelatih atau tenaga medis untuk keputusan kesehatan. Jangan abaikan nyeri atau gejala cedera.</p>
+        <p className={p}>Saran pelatihan, prediksi balapan, dan diagnosis dari fitur AI dihasilkan oleh model kecerdasan buatan eksternal dan <b>bukan nasihat medis</b>. Selalu konsultasi dengan pelatih atau tenaga medis untuk keputusan kesehatan. Jangan abaikan nyeri atau gejala cedera.</p>
 
         <h2 className={h2}>6. Penggunaan yang Dilarang</h2>
         <ul className="space-y-1 mb-2">
@@ -51,7 +51,7 @@ export default function Terms() {
 
         <h2 className={h2}>7. Ketersediaan & Perubahan Layanan</h2>
         <ul className="space-y-1 mb-2">
-          <li className={li}>RunOS berjalan di infrastruktur cloud (Vercel, Cloudflare, Supabase) dengan paket gratis — <b>tanpa jaminan uptime</b> dan tanpa SLA.</li>
+          <li className={li}>RunOS berjalan di infrastruktur cloud — <b>tanpa jaminan uptime</b> dan tanpa SLA.</li>
           <li className={li}>Fitur dapat ditambah, diubah, atau dihapus sewaktu-waktu; pemeliharaan dapat menyebabkan gangguan sementara.</li>
           <li className={li}>Jadwal sinkronisasi otomatis dapat disesuaikan demi stabilitas layanan.</li>
         </ul>
