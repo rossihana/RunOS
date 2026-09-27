@@ -10,3 +10,6 @@ scripts/garmin_sync.env
 scripts/.garmin_tokens
 backend/tmp/
 frontend/tsconfig.tsbuildinfo
+
+.vercel
+.env*
