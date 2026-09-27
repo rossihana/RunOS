@@ -1,5 +1,5 @@
 # Sync/verify Garmin lewat GitHub Actions — dipanggil backend (Vercel) via workflow_dispatch,
-# plus jadwal harian 07:00 WIB (00:00 UTC) sebagai pengganti cron lokal yang di-pause.
+# plus jadwal harian **09:00 & 21:00 WIB** (02:00 & 14:00 UTC) sebagai pengganti cron lokal yang di-pause.
 # Alasan: serverless tak bisa spawn Python; runner GitHub gratis utk repo publik.
 # Serial (concurrency group): Garmin menolak login paralel → semua run antre 1 per 1.
 # Token login di-cache antar run (anti 429 login berulang).
@@ -28,7 +28,7 @@ on:
         type: boolean
         default: true
   schedule:
-    - cron: "0 0 * * *" # 00:00 UTC = 07:00 WIB
+    - cron: ["0 2 * * *", "0 14 * * *"] # 02:00 & 14:00 UTC = 09:00 & 21:00 WIB
 
 concurrency:
   group: garmin-serial
