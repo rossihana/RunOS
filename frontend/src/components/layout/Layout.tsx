@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Activity, LayoutDashboard, Flag, LogOut, Menu, Sparkles, ClipboardList, FlaskConical, Cpu, Watch, MailWarning } from 'lucide-react';
+import { Activity, LayoutDashboard, Flag, LogOut, Menu, Sparkles, ClipboardList, FlaskConical, Cpu, Watch, MailWarning, FileText, ShieldCheck } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import api from '../../services/api';
@@ -134,6 +134,29 @@ export default function Layout() {
         <div className={`p-4 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-4 flex-shrink-0 ${isSidebarCollapsed ? 'items-center' : ''}`}>
           <div className={`${isSidebarCollapsed ? '' : 'px-2'}`}>
             <ThemeToggle hideLabel={isSidebarCollapsed} />
+          </div>
+          {/* Legal: di bawah theme toggle, di atas Sign out */}
+          <div className={`flex ${isSidebarCollapsed ? 'flex-row justify-center gap-1' : 'flex-col gap-0.5 px-2'}`}>
+            <Link
+              to="/terms"
+              target="_blank"
+              rel="noreferrer"
+              title={isSidebarCollapsed ? 'Terms of Service' : undefined}
+              className={`flex items-center text-xs font-medium text-zinc-500 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors ${isSidebarCollapsed ? 'justify-center h-9 w-9 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800' : 'py-1.5'}`}
+            >
+              <FileText className={`${isSidebarCollapsed ? '' : 'mr-2'} h-3.5 w-3.5`} />
+              {!isSidebarCollapsed && <span>Terms of Service</span>}
+            </Link>
+            <Link
+              to="/privacy"
+              target="_blank"
+              rel="noreferrer"
+              title={isSidebarCollapsed ? 'Privacy Policy' : undefined}
+              className={`flex items-center text-xs font-medium text-zinc-500 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors ${isSidebarCollapsed ? 'justify-center h-9 w-9 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800' : 'py-1.5'}`}
+            >
+              <ShieldCheck className={`${isSidebarCollapsed ? '' : 'mr-2'} h-3.5 w-3.5`} />
+              {!isSidebarCollapsed && <span>Privacy Policy</span>}
+            </Link>
           </div>
           <button
             onClick={handleLogout}
