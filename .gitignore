@@ -13,3 +13,6 @@ frontend/tsconfig.tsbuildinfo
 
 .vercel
 .env*
+
+# backup lokal (jangan pernah masuk repo)
+*.enc

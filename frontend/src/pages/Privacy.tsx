@@ -44,6 +44,8 @@ export default function Privacy() {
         <h2 className={h2}>6. Penyimpanan & Keamanan</h2>
         <ul className="space-y-1 mb-2">
           <li className={li}>Password RunOS: hash scrypt. Password Garmin: AES-256-GCM terenkripsi, kunci enkripsi disimpan terpisah dari database.</li>
+          <li className={li}>Koneksi database diamankan TLS (terenkripsi saat lewat jaringan); penyedia database mengenkripsi data saat disimpan di disk.</li>
+          <li className={li}>Data dicadangkan otomatis setiap hari dalam bentuk <b>terenkripsi</b> dengan kunci yang disimpan terpisah dari database; cadangan disimpan maksimal 90 hari lalu dihapus otomatis.</li>
           <li className={li}>Sesi sync Garmin per-user terisolasi (token per user, tidak bercampur); log proses sinkronisasi disamarkan untuk kredensial.</li>
           <li className={li}>Koneksi seluruh layanan menggunakan HTTPS/TLS.</li>
           <li className={li}>Kami tidak bisa dan tidak akan menampilkan password Garmin-mu kembali — kalau lupa, cukup disconnect lalu reconnect.</li>

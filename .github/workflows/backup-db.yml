@@ -1,0 +1,45 @@
+name: db-backup
+
+# Backup data → JSON terenkripsi AES-256-GCM (kunci = ENCRYPTION_KEY, rahasia).
+# Hasil diunggah sebagai artefak terenkripsi (retensi 90 hari) — repo publik pun aman
+# karena berkasnya sudah terenkripsi sebelum diunggah.
+on:
+  schedule:
+    - cron: "0 3 * * *"   # 10:00 WIB
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependensi backend (untuk pg + dotenv)
+        run: npm ci --prefix backend --no-audit --no-fund
+
+      - name: Dump + enkripsi
+        env:
+          RUNOS_DATABASE_URL: ${{ secrets.RUNOS_DATABASE_URL }}
+          RUNOS_ENCRYPTION_KEY: ${{ secrets.RUNOS_ENCRYPTION_KEY }}
+        run: |
+          OUT="runos-backup-${{ github.run_number }}-$(date -u +%F).enc"
+          node backend/scripts/backup_db.mjs dump --out "$OUT"
+
+      - name: Upload artefak terenkripsi
+        uses: actions/upload-artifact@v4
+        with:
+          name: runos-backup-${{ github.run_number }}
+          path: runos-backup-*.enc
+          retention-days: 90
+          if-no-files-found: error
