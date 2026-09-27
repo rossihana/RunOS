@@ -28,7 +28,8 @@ on:
         type: boolean
         default: true
   schedule:
-    - cron: ["0 2 * * *", "0 14 * * *"] # 02:00 & 14:00 UTC = 09:00 & 21:00 WIB
+    - cron: "0 2 * * *"    # 02:00 UTC = 09:00 WIB
+    - cron: "0 14 * * *"   # 14:00 UTC = 21:00 WIB
 
 concurrency:
   group: garmin-serial
