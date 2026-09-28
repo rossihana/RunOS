@@ -2,9 +2,9 @@
 
 > **AI-powered running training dashboard** — analitik lari, data kesehatan (HRV, sleep, VO2max), rencana latihan adaptif, dan AI Coach dalam satu aplikasi web.
 
-![Demo RunOS](docs/demo.gif)
+![RunOS — video iklan](docs/ad.gif)
 
-*(Atau tonton [video MP4](docs/demo.mp4))*
+*[Video iklan MP4](docs/ad.mp4) · [Video demo aplikasi (GIF)](docs/demo.gif) · [Video demo MP4](docs/demo.mp4)*
 
 **Live: [https://runos.web.id](https://runos.web.id)** · [Terms of Service](https://runos.web.id/terms) · [Privacy Policy](https://runos.web.id/privacy)
 
