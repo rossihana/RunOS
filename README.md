@@ -4,7 +4,7 @@
 
 ![RunOS — video iklan](docs/ad.gif)
 
-*[Video iklan MP4](docs/ad.mp4) · [Video demo aplikasi (GIF)](docs/demo.gif) · [Video demo MP4](docs/demo.mp4)*
+*[Video iklan MP4](docs/ad.mp4)*
 
 **Live: [https://runos.web.id](https://runos.web.id)** · [Terms of Service](https://runos.web.id/terms) · [Privacy Policy](https://runos.web.id/privacy)
 
