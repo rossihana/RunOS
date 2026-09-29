@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import api from '../../services/api';
 import { ThemeToggle } from './ThemeToggle';
+import { Logo, LogoMark } from '../ui/Logo';
 
 /** Banner "email belum terverifikasi" — muncul sampai user klik link di email. */
 function VerifyBanner() {
@@ -84,15 +85,12 @@ export default function Layout() {
             <motion.span 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="text-xl font-bold text-zinc-900 dark:text-white tracking-tight"
             >
-              RunOS
+              <Logo />
             </motion.span>
           )}
           {isSidebarCollapsed && (
-            <div className="w-8 h-8 bg-zinc-900 dark:bg-zinc-100 rounded-lg flex items-center justify-center">
-              <span className="text-white dark:text-zinc-900 font-black text-xs">R</span>
-            </div>
+            <LogoMark className="w-8 h-8" />
           )}
           
           <button
@@ -176,7 +174,7 @@ export default function Layout() {
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         {/* Mobile header (Fixed at top) */}
         <header className="flex-shrink-0 md:hidden h-14 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-lg border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-4 transition-colors z-30">
-          <span className="text-lg font-bold text-zinc-900 dark:text-white tracking-tight">RunOS</span>
+          <Logo markClass="w-6 h-6" textClass="text-lg font-bold" />
           <div className="flex items-center gap-3">
             <ThemeToggle />
             <button

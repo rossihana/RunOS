@@ -1,6 +1,8 @@
-# RunOS
-
-> **AI-powered running training dashboard** — analitik lari, data kesehatan (HRV, sleep, VO2max), rencana latihan adaptif, dan AI Coach dalam satu aplikasi web.
+<div align="center">
+  <img src="logo/logo/route.png" width="88" alt="Logo RunOS" />
+  <h1>RunOS</h1>
+  <p><b>AI-powered running training dashboard</b> — analitik lari, data kesehatan (HRV, sleep, VO2max), rencana latihan adaptif, dan AI Coach.</p>
+</div>
 
 ![RunOS — video iklan](docs/ad.gif)
 
