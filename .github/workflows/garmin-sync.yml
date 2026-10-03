@@ -78,8 +78,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: tokenstore
-          key: garmin-token-${{ inputs.user_id }}
+          # run_id di key: actions/cache tak bisa menimpa key lama → tanpa ini token
+          # yang tersimpan pertama kali (key `garmin-token-<uid>`) terpakai selamanya
+          # sampai kedaluwarsa (±27 jam) → sync manual 401 selamanya.
+          key: garmin-token-${{ inputs.user_id }}-${{ github.run_id }}
           restore-keys: |
+            garmin-token-${{ inputs.user_id }}-
             garmin-token-
 
       # jadwal: semua user dalam satu run → cache seluruh pohon tstore/ antar run

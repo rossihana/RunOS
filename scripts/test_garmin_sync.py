@@ -171,4 +171,57 @@ be_g = compute_best_efforts_from_streams(
     categories=[("1K", 1000.0)])
 assert be_g["1K"] == 333, be_g.get("1K")  # gap 60 dtk tidak dihitung
 
+# ── login_garmin: token basi → fallback login kredensial ──
+import base64, json as _json, tempfile, time as _time
+from garmin_sync import login_garmin
+
+class _StubClient:
+    def __init__(self): self.saved = False
+    def dump(self, p): self.saved = True
+
+class _StubGarmin:
+    """reject_cache=True → login(tokenstore=..) raise (token basi/dicabut); False → sukses."""
+    def __init__(self, reject_cache=False):
+        self.client = _StubClient(); self.fresh = False; self.reject_cache = reject_cache
+    def login(self, tokenstore=None):
+        if tokenstore and self.reject_cache:
+            raise RuntimeError("API Error 401")
+        if tokenstore and not self.reject_cache:
+            return self
+        self.fresh = True
+        return self
+
+def _mk_token(store, exp):
+    pad = lambda b: base64.urlsafe_b64encode(b).decode().rstrip("=")
+    payload = pad(_json.dumps({"exp": exp}).encode())
+    with open(os.path.join(store, "garmin_tokens.json"), "w", encoding="utf-8") as f:
+        _json.dump({"di_token": f"x.{payload}.y"}, f)
+
+import garmin_sync as _gs
+_real_store = _gs.TOKENSTORE
+_store = tempfile.mkdtemp(prefix="gtok_")
+_gs.TOKENSTORE = _store
+
+# 1) token hidup → pakai cache (tidak login fresh)
+_mk_token(_store, int(_time.time()) + 3600)
+_g = _StubGarmin()
+login_garmin(_g)
+assert not _g.fresh, "token hidup seharusnya tidak memicu login ulang"
+
+# 2) token basi → file dihapus + login kredensial
+_mk_token(_store, int(_time.time()) - 3600)
+_g = _StubGarmin(reject_cache=True)
+login_garmin(_g)
+assert _g.fresh, "token basi harus memicu login ulang"
+assert not os.path.exists(os.path.join(_store, "garmin_tokens.json")), "token basi harus dihapus"
+
+# 3) token hidup tapi ditolak Garmin (dicabut) → fallback tetap jalan
+_mk_token(_store, int(_time.time()) + 3600)
+_g = _StubGarmin(reject_cache=True)
+login_garmin(_g)
+assert _g.fresh, "token dicabut (401) harus memicu login ulang"
+assert _g.client.saved, "token baru harus disimpan"
+_gs.TOKENSTORE = _real_store
+
 print("✅ Semua self-check lulus")
+

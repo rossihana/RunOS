@@ -51,6 +51,43 @@ def need(key):
         raise SystemExit(f"❌ {key} tidak ditemukan (garmin_sync.env / environment)")
     return val
 
+
+def login_garmin(c, label=""):
+    """Login Garmin: pakai token cache; kalau basi/dicabut → login ulang kredensial.
+
+    Token Garmin = JWT berumur ±27 jam, jadi sering basi → jalur manual 401.
+    Cek `exp` dulu (murni lokal, tanpa hit Garmin) → kalau masih hidup langsung pakai.
+    """
+    tok = os.path.join(TOKENSTORE, "garmin_tokens.json")
+    if os.path.exists(tok):
+        try:
+            import base64, json as _json, time as _time
+            data = _json.load(open(tok, encoding="utf-8"))
+            seg = (data.get("di_token") or "").split(".")
+            if len(seg) >= 2:
+                pad = lambda s: s + "=" * (-len(s) % 4)
+                exp = _json.loads(base64.urlsafe_b64decode(pad(seg[1]))).get("exp")
+                if exp and exp < _time.time():
+                    raise RuntimeError(f"kedaluwarsa {_time.strftime('%Y-%m-%d %H:%M', _time.gmtime(exp))} UTC")
+        except Exception as e:
+            print(f"⚠️  Token Garmin cache tak layak pakai [{e}] → login ulang")
+            try:
+                os.remove(tok)
+            except OSError:
+                pass
+
+    try:
+        c.login(tokenstore=TOKENSTORE)
+    except Exception as e:
+        print(f"⚠️  Login token cache gagal [{type(e).__name__}] → login ulang pakai kredensial")
+        c.login()
+    try:
+        c.client.dump(TOKENSTORE)  # simpan sesi untuk run berikutnya
+    except Exception:
+        pass
+    print(f"✅ Login Garmin ok{label}")
+    return c
+
 # ─── Mapping Garmin -> skema RunOS ───
 
 def map_summary(a):
@@ -499,11 +536,7 @@ def main():
     if args.verify_only:
         from garminconnect import Garmin
         c = Garmin(email=need("GARMIN_EMAIL"), password=need("GARMIN_PASSWORD"))
-        c.login(tokenstore=TOKENSTORE)
-        try:
-            c.client.dump(TOKENSTORE)
-        except Exception:
-            pass
+        login_garmin(c)
         print("VERIFY_OK")
         return
 
@@ -519,12 +552,7 @@ def main():
 
     from garminconnect import Garmin
     c = Garmin(email=need("GARMIN_EMAIL"), password=need("GARMIN_PASSWORD"))
-    c.login(tokenstore=TOKENSTORE)  # load token lama kalau ada; kalau tak ada -> login kredensial
-    try:
-        c.client.dump(TOKENSTORE)  # simpan sesi untuk run berikutnya
-    except Exception:
-        pass
-    print("✅ Login Garmin ok")
+    login_garmin(c)
 
     # --health jalan dulu dengan login yang sama; kalau ada --days/--details → lanjut sync aktivitas
     if args.health:
