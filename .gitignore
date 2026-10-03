@@ -14,5 +14,14 @@ frontend/tsconfig.tsbuildinfo
 .vercel
 .env*
 
+# sampah debug skrip sekali pakai (bisa berisi token JWT / dump user)
+jwt*.txt
+req.json
+users.json
+*.jsonl
+diag_*.sh
+mkjwt.*
+graphify-out/
+
 # backup lokal (jangan pernah masuk repo)
 *.enc
