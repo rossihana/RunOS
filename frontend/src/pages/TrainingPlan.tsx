@@ -45,7 +45,11 @@ export default function TrainingPlan() {
       
       if (masterRes.data) setMasterPlan(masterRes.data);
       
-      const racesWithPlans = racesRes.data.filter((r: Race) => r.training_plan);
+      // Race lewat otomatis keluar dari training (arsip hasilnya tetap di halaman Races)
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const racesWithPlans = racesRes.data.filter((r: Race) =>
+        r.training_plan && new Date(r.race_date) >= today
+      );
       setRaces(racesWithPlans);
       
       // If no master plan, default to individual

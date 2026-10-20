@@ -4,6 +4,7 @@ import { format } from 'date-fns';
 import { ArrowLeft, Clock, MapPin, Activity as ActivityIcon, HeartPulse, Mountain, TrendingUp, Award, Sparkles, Wand2, Footprints } from 'lucide-react';
 import api from '../services/api';
 import { decodePolyline } from '../utils/polyline';
+import { useTheme } from '../components/layout/ThemeProvider';
 import ReactMarkdown from 'react-markdown';
 
 // Mapping
@@ -66,6 +67,17 @@ export default function ActivityDetail() {
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [showAIModal, setShowAIModal] = useState(false);
+  const { theme } = useTheme();
+  const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  useEffect(() => {
+    if (theme === 'dark') { setIsDark(true); return; }
+    if (theme === 'light') { setIsDark(false); return; }
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const sync = () => setIsDark(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, [theme]);
 
   useEffect(() => {
     const fetchActivity = async () => {
@@ -230,11 +242,13 @@ export default function ActivityDetail() {
                  bounds={mapBounds}
                  className="w-full h-full z-0"
                  zoomControl={true}
-                 scrollWheelZoom={false}
+                 scrollWheelZoom={true}
              >
                  <TileLayer
-                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                     key={isDark ? 'dark' : 'light'}
+                     attribution='Tiles &copy; <a href="https://www.esri.com/">Esri</a> &mdash; Esri, DeLorme, HERE &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                     url={`https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${isDark ? 'World_Dark_Gray_Base' : 'World_Light_Gray_Base'}/MapServer/tile/{z}/{y}/{x}`}
+                     maxZoom={16}
                  />
                  <LeafletPolyline positions={mapPositions} pathOptions={{ color: '#f97316', weight: 4 }} />
              </MapContainer>
