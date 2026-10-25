@@ -224,6 +224,13 @@ export default function AiSettings() {
               ))}
               {providers.length === 0 && <p className="text-xs text-zinc-400">Belum ada provider tambahan.</p>}
             </div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-bold">Preset:</span>
+              <button
+                onClick={() => { setNpName('9router'); setNpUrl('https://router.runos.web.id/v1'); setNpKey(''); }}
+                className="px-2 py-1 text-[10px] font-bold rounded-lg bg-orange-50 dark:bg-orange-950/30 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-900 hover:bg-orange-100 dark:hover:bg-orange-900/40 transition-colors"
+              >⚡ 9router</button>
+            </div>
             <div className="grid grid-cols-[1fr_2fr_2fr_auto] gap-2">
               <input value={npName} onChange={e => setNpName(e.target.value)} placeholder="nama" className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-3 py-2 text-xs" />
               <input value={npUrl} onChange={e => setNpUrl(e.target.value)} placeholder="https://api.provider.com/v1" className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-3 py-2 text-xs" />

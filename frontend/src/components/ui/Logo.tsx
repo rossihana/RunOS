@@ -1,20 +1,17 @@
 /**
- * Logo RunOS — ikon "route" (jalur GPS + titik finish) inline SVG + wordmark.
- * Sumber master: logo/render_icon.py (palet resmi index.css).
+ * Logo RunOS — mark "Open Track": lintasan stadium terbuka monoline di tile oranye.
+ * Master: logo-redesign/logo-open-track/ (palet resmi index.css: #FC4C02).
  */
 export function LogoMark({ className = 'w-7 h-7' }: { className?: string }) {
   return (
     <svg viewBox="0 0 64 64" className={className} role="img" aria-label="RunOS">
-      <rect width="64" height="64" rx="14" fill="#18181b" />
+      <rect width="64" height="64" rx="14" fill="#FC4C02" />
       <path
-        d="M14 50 V30 H30 V16 H46 V40 L50 44"
+        d="M 11.75 36 A 10.25 10.25 0 0 0 22 46.25 L 42 46.25 A 10.25 10.25 0 0 0 52.25 36 L 52.25 28 A 10.25 10.25 0 0 0 42 17.75 L 22 17.75 A 10.25 10.25 0 0 0 11.75 28 L 11.75 29"
         fill="none"
         stroke="#ffffff"
-        strokeWidth="5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        strokeWidth="5.5"
       />
-      <circle cx="50" cy="44" r="6" fill="#FC4C02" />
     </svg>
   );
 }

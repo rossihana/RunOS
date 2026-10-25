@@ -33,7 +33,7 @@ interface TrainingLogProps {
 const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
 export default function TrainingLog({ data }: TrainingLogProps) {
-  const [hoveredDay, setHoveredDay] = useState<DailyLog | null>(null);
+  const [hoveredDay, setHoveredDay] = useState<{ day: DailyLog; x: number; y: number } | null>(null);
 
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -111,7 +111,10 @@ export default function TrainingLog({ data }: TrainingLogProps) {
                   <div 
                     key={day.date} 
                     className="flex justify-center"
-                    onMouseEnter={() => hasRun && setHoveredDay(day)}
+                    onMouseEnter={(e) => hasRun && setHoveredDay({ day, x: e.clientX, y: e.clientY })}
+                    onMouseMove={(e) => setHoveredDay((h) =>
+                      h && h.day.date === day.date ? { day, x: e.clientX, y: e.clientY } : h
+                    )}
                     onMouseLeave={() => setHoveredDay(null)}
                   >
                     {hasRun ? (
@@ -158,22 +161,22 @@ export default function TrainingLog({ data }: TrainingLogProps) {
           )})}
         </div>
 
-        {/* Global Tooltip */}
+        {/* Global Tooltip — mengikuti kursor */}
         {hoveredDay && (
-          <div className="fixed z-50 pointer-events-none" style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
+          <div className="fixed z-50 pointer-events-none" style={{ top: hoveredDay.y, left: hoveredDay.x, transform: 'translate(-50%, calc(-100% - 14px))' }}>
             <div className="bg-zinc-900 dark:bg-white text-zinc-100 dark:text-[#1C1C1E] rounded-xl px-4 py-3 shadow-2xl border border-zinc-800 dark:border-zinc-200 transition-colors">
               <div className="text-xs font-semibold text-zinc-400 dark:text-zinc-500 mb-1 border-b border-zinc-700 dark:border-zinc-200 pb-1">
-                {format(parseISO(hoveredDay.date), 'EEEE, MMMM d, yyyy')}
+                {format(parseISO(hoveredDay.day.date), 'EEEE, MMMM d, yyyy')}
               </div>
               <div className="flex items-center gap-4 mt-2">
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-0.5">Distance</div>
-                  <div className="font-bold text-lg">{(hoveredDay.distance / 1000).toFixed(2)} <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500">km</span></div>
+                  <div className="font-bold text-lg">{(hoveredDay.day.distance / 1000).toFixed(2)} <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500">km</span></div>
                 </div>
                 <div className="w-px h-8 bg-zinc-700 dark:bg-zinc-200"></div>
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-0.5">Time</div>
-                  <div className="font-bold text-lg">{formatTime(hoveredDay.moving_time)}</div>
+                  <div className="font-bold text-lg">{formatTime(hoveredDay.day.moving_time)}</div>
                 </div>
               </div>
             </div>

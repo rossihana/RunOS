@@ -25,3 +25,8 @@ graphify-out/
 
 # backup lokal (jangan pernah masuk repo)
 *.enc
+
+# desain logo: hanya kit final, iterasi/renders diabaikan
+logo-redesign/*
+!logo-redesign/logo-open-track/
+logo-redesign/logo-open-track/renders/
