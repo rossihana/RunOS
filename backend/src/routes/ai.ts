@@ -67,6 +67,25 @@ function isSafeProviderUrl(rawUrl: string): boolean {
   }
 }
 
+// Pesan error BYOK yang mendidik: jelaskan KENAPA ditolak + jalan keluarnya.
+function providerUrlError(rawUrl: string): string {
+  let host = '';
+  try { host = new URL(rawUrl).hostname.toLowerCase(); } catch { /* unparsable */ }
+  const isPrivate = /(^|\.)(localhost|local)$/.test(host) || host === '::1' || host === '[::1]'
+    || host.startsWith('127.') || host.startsWith('10.') || host.startsWith('192.168.')
+    || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) || host === '169.254.169.254';
+  if (isPrivate) {
+    return 'Endpoint lokal/privat tidak bisa dijangkau server cloud (proteksi SSRF). '
+      + 'Exposé dulu via tunnel: jalankan "cloudflared tunnel --url http://localhost:20128" '
+      + 'lalu pakai URL publiknya sebagai Base URL. RunOS self-host di mesinmu sendiri? '
+      + 'Set env ALLOW_PRIVATE_ENDPOINTS=1 untuk mengizinkan localhost.';
+  }
+  if (host) {
+    return `Base URL tidak valid. Pastikan lengkap dengan skema, contoh: https://${host || 'api.provider.com'}/v1`;
+  }
+  return 'Base URL tidak valid. Sertakan skema lengkap, contoh: https://api.provider.com/v1';
+}
+
 // ─── S2: user biasa hanya boleh model GRATIS + provider sendiri (BYOK).
 // Owner (OWNER_EMAILS) bebas pakai semua model di 9router (termasuk glm-5.3-flash).
 async function emailOf(userId: number): Promise<string> {
@@ -176,7 +195,7 @@ router.put('/providers', authenticate, catchAsync(async (req: AuthRequest, res: 
     return res.status(400).json({ error: 'Nama provider tidak valid (huruf/angka/-/_ , maks 30)' });
   }
   if (typeof baseUrl !== 'string' || !isSafeProviderUrl(baseUrl) || baseUrl.length > 300) {
-    return res.status(400).json({ error: 'Base URL tidak valid atau mengarah ke alamat internal/privat' });
+    return res.status(400).json({ error: providerUrlError(typeof baseUrl === 'string' ? baseUrl : '') });
   }
   if (typeof apiKey !== 'string' || apiKey.length < 8 || apiKey.length > 300) {
     return res.status(400).json({ error: 'API key tidak valid' });
