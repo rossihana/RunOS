@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+// Vite: worker maplibre v6 tidak ter-emit otomatis → arahkan eksplisit (?worker&url = file hashed di /assets)
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 /** Halaman diagnose publik: peta MapLibre + route dummy + kolektor error on-screen. */
 export default function MapTest() {
