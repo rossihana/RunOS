@@ -22,6 +22,7 @@ const Activities = lazy(() => import('./pages/Activities'));
 const ActivityDetail = lazy(() => import('./pages/ActivityDetail'));
 const MapPrototype = lazy(() => import('./pages/MapPrototype'));
 const MapTest = lazy(() => import('./pages/MapTest'));
+const MapCompare = lazy(() => import('./pages/MapCompare'));
 const Races = lazy(() => import('./pages/Races'));
 const AICoach = lazy(() => import('./pages/AICoach.tsx'));
 const AiSettings = lazy(() => import('./pages/AiSettings.tsx'));
@@ -62,6 +63,7 @@ export default function App() {
               </Route>
             </Route>
             <Route path="map-test" element={<MapTest />} />
+            <Route path="map-compare/:id" element={<MapCompare />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
