@@ -14,9 +14,11 @@ import { decodePolyline } from '../utils/polyline';
  * Style gratis tanpa key: OpenFreeMap (liberty/positron/bright).
  */
 const STYLES = [
-  { id: 'liberty', label: 'Liberty (detail warna)' },
-  { id: 'positron', label: 'Positron (minimal terang)' },
+  { id: 'liberty', label: 'Liberty (OSM vector)' },
+  { id: 'positron', label: 'Positron (minimal)' },
   { id: 'bright', label: 'Bright (kontras)' },
+  { id: 'esri-light', label: 'Esri raster (sama dgn Leaflet)' },
+  { id: 'esri-dark', label: 'Esri gelap' },
 ];
 
 export default function MapPrototype() {
@@ -93,7 +95,17 @@ export default function MapPrototype() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded?.()) return;
-    map.setStyle(`https://tiles.openfreemap.org/styles/${styleId}`, { diff: false });
+    if (styleId.startsWith('esri')) {
+      const dark = styleId === 'esri-dark';
+      map.setStyle({
+        version: 8,
+        sources: { esri: { type: 'raster', tileSize: 256, attribution: 'Tiles © Esri',
+          tiles: [`https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${dark ? 'World_Dark_Gray_Base' : 'World_Light_Gray_Base'}/MapServer/tile/{z}/{y}/{x}`] } },
+        layers: [{ id: 'esri', type: 'raster', source: 'esri' }],
+      }, { diff: false });
+    } else {
+      map.setStyle(`https://tiles.openfreemap.org/styles/${styleId}`, { diff: false });
+    }
     // rute ditambahkan ulang oleh effect data saat style selesai load (source hilang)
     map.once('styledata', () => {
       if (map.getSource('route')) return;
