@@ -20,6 +20,7 @@ const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Activities = lazy(() => import('./pages/Activities'));
 const ActivityDetail = lazy(() => import('./pages/ActivityDetail'));
+const MapPrototype = lazy(() => import('./pages/MapPrototype'));
 const Races = lazy(() => import('./pages/Races'));
 const AICoach = lazy(() => import('./pages/AICoach.tsx'));
 const AiSettings = lazy(() => import('./pages/AiSettings.tsx'));
@@ -50,6 +51,7 @@ export default function App() {
                 <Route index element={<Dashboard />} />
                 <Route path="activities" element={<Activities />} />
                 <Route path="activities/:id" element={<ActivityDetail />} />
+                <Route path="map-proto/:id" element={<MapPrototype />} />
                 <Route path="races" element={<Races />} />
                 <Route path="training" element={<TrainingPlan />} />
                 <Route path="ai-coach" element={<AICoach />} />
