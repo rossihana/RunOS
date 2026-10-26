@@ -52,7 +52,7 @@ export default function GarminSettings() {
       });
       setConnected(true);
       setGKey('');
-      setMsg('✅ Garmin terhubung via Personal API resmi! Sync harian otomatis aktif (tiap pagi 07:00).');
+      setMsg('✅ Garmin terhubung via Personal API resmi! Sync otomatis 2x sehari aktif (pagi & malam — jam bisa bergeser).');
       await loadStatus();
     } catch (e: any) {
       setMsg(`⚠️ ${e?.response?.data?.error || 'Gagal menghubungkan'}`);
@@ -76,7 +76,7 @@ export default function GarminSettings() {
       await api.post('/activities/garmin/connect', { email: gEmail, password: gPass, acceptTerms: true });
       setConnected(true);
       setGEmail(''); setGPass('');
-      setMsg('✅ Garmin terhubung! Sync harian otomatis aktif (tiap pagi 07:00).');
+      setMsg('✅ Garmin terhubung! Sync otomatis 2x sehari aktif (pagi & malam — jam bisa bergeser).');
     } catch (e: any) {
       setMsg(`⚠️ ${e?.response?.data?.error || 'Gagal menghubungkan'}`);
     } finally { setBusy(null); }
@@ -104,7 +104,7 @@ export default function GarminSettings() {
             <p className="text-sm font-bold text-zinc-900 dark:text-white">Akun RunOS-mu jadi! 🎉</p>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">
               Satu langkah terakhir: hubungkan Garmin-mu di bawah supaya data lari langsung masuk.
-              Setelah terhubung, semua otomatis — sync harian jam 07:00 pagi.
+              Setelah terhubung, semua otomatis — sync otomatis 2x sehari (pagi & malam — jam bisa bergeser).
             </p>
           </div>
         </div>
