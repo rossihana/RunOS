@@ -138,7 +138,7 @@ export default function GarminSettings() {
                 </div>
                 <div className="flex-1">
                   <h2 className="text-lg font-bold text-zinc-900 dark:text-white">Garmin terhubung</h2>
-                  <p className="text-sm text-zinc-500 mt-0.5">Sync otomatis harian aktif (tiap pagi 07:00). Data lari barumu masuk sendiri.</p>
+                  <p className="text-sm text-zinc-500 mt-0.5">Sync otomatis aktif 2× sehari via GitHub Actions (pagi & malam — jam bisa bergeser beberapa jam karena antrean runner). Data lari barumu masuk sendiri.</p>
                   <button
                     onClick={syncNow}
                     disabled={busy !== null}

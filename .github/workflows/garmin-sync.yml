@@ -137,7 +137,7 @@ jobs:
           python scripts/garmin_sync.py --user-id "${{ inputs.user_id }}" $extra
 
       # --- jadwal harian: loop serial semua user terhubung (1 login pada 1 waktu) ---
-      - name: Sync semua user terhubung (jadwal 07:00 WIB)
+      - name: Sync semua user terhubung (jadwal 09:00 & 21:00 WIB nominal — jam eksekusi bisa drift)
         if: steps.mode.outputs.mode == 'schedule'
         env:
           API: ${{ secrets.RUNOS_API_URL }}
