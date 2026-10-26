@@ -235,6 +235,23 @@ export default function ActivityDetail() {
          </Link>
       </div>
 
+      {/* Header (judul, tanggal, Analyze Run) — di ATAS kanvas peta, bukan overlay */}
+      <div className="flex items-center justify-between gap-4 mb-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white truncate">{activity.name}</h1>
+          <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mt-1">
+            {format(new Date(activity.start_date_local), 'EEEE, MMMM d, yyyy • h:mm a')}
+          </p>
+        </div>
+        <button
+          onClick={handleAnalyze}
+          className="ml-4 shrink-0 p-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-2 font-bold text-sm"
+        >
+          <Sparkles className="w-4 h-4 fill-white" />
+          <span className="hidden sm:inline">Analyze Run</span>
+        </button>
+      </div>
+
       {/* Hero Map Section (Interactive) */}
       <div className="relative h-64 sm:h-80 md:h-96 -mx-4 sm:-mx-6 lg:-mx-8 bg-zinc-100 dark:bg-zinc-900 mb-8 border-b border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-inner isolate z-0">
         {mapBounds ? (
@@ -258,26 +275,6 @@ export default function ActivityDetail() {
              <p>No GPS Data Available</p>
            </div>
         )}
-        
-        {/* Header Content overlay on Map (pointer-events-none so we can click the map underneath) */}
-        <div className="absolute bottom-6 left-0 right-0 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto pointer-events-none">
-           {/* Semi-transparent backdrop for text readability over the interactive map */}
-           <div className="flex items-center justify-between p-4 rounded-xl bg-white/80 dark:bg-black/80 backdrop-blur-md shadow-lg pointer-events-auto border border-zinc-200/50 dark:border-zinc-800/50 min-w-0">
-               <div className="min-w-0">
-                  <h1 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white truncate">{activity.name}</h1>
-                  <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mt-1">
-                    {format(new Date(activity.start_date_local), 'EEEE, MMMM d, yyyy • h:mm a')}
-                  </p>
-               </div>
-               <button
-                  onClick={handleAnalyze}
-                  className="ml-4 shrink-0 p-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-2 font-bold text-sm"
-               >
-                 <Sparkles className="w-4 h-4 fill-white" />
-                 <span className="hidden sm:inline">Analyze Run</span>
-               </button>
-           </div>
-        </div>
       </div>
 
       {/* AI Analysis Modal */}
