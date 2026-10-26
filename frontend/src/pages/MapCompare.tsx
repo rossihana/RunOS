@@ -33,7 +33,11 @@ export default function MapCompare() {
 
   const lons = coords.map(([, lo]) => lo);
   const las = coords.map(([la]) => la);
-  const bounds: [[number, number], [number, number]] | null = coords.length >= 2
+  // Leaflet: [[lat,lng]…] · MapLibre fitBounds: [[lng,lat],[lng,lat]] — URUTAN BEDA (bug 500/blank lama)
+  const boundsLeaflet: [[number, number], [number, number]] | null = coords.length >= 2
+    ? [[Math.min(...las), Math.min(...lons)], [Math.max(...las), Math.max(...lons)]]
+    : null;
+  const boundsMaplibre: [[number, number], [number, number]] | null = coords.length >= 2
     ? [[Math.min(...lons), Math.min(...las)], [Math.max(...lons), Math.max(...las)]]
     : null;
 
@@ -68,7 +72,7 @@ export default function MapCompare() {
         map.addSource('route', { type: 'geojson', data: geojson });
         map.addLayer({ id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': '#f97316', 'line-width': 4 } });
       }
-      map.fitBounds(bounds!, { padding: 40, duration: 0 });
+      map.fitBounds(boundsMaplibre!, { padding: 40, duration: 0 });
       setReady((p) => ({ ...p, maplibre: true }));
     };
     if (map.isStyleLoaded()) inject();
@@ -87,8 +91,8 @@ export default function MapCompare() {
         <div>
           <p className="text-xs font-bold text-zinc-500 mb-1">LEAFLET (raster SVG)</p>
           <div className="h-[60vh] rounded-xl overflow-hidden border border-zinc-300 dark:border-zinc-700">
-            {bounds && (
-              <MapContainer bounds={bounds} style={{ width: '100%', height: '100%' }} scrollWheelZoom>
+            {boundsLeaflet && (
+              <MapContainer bounds={boundsLeaflet} style={{ width: '100%', height: '100%' }} scrollWheelZoom>
                 <TileLayer
                   attribution='Tiles © Esri'
                   url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"

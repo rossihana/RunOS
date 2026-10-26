@@ -12,8 +12,11 @@ const COORDS: [number, number][] = [
   [-7.7930, 110.3740], [-7.7920, 110.3770], [-7.7940, 110.3800], [-7.7930, 110.3830],
   [-7.7950, 110.3860], [-7.7940, 110.3890],
 ];
-const BOUNDS: [[number, number], [number, number]] = [
-  [-7.7950, 110.3617], [-7.7900, 110.3890],
+const BOUNDS_LEAFLET: [[number, number], [number, number]] = [
+  [-7.7950, 110.3617], [-7.7900, 110.3890],   // Leaflet: [lat, lng]
+];
+const BOUNDS_MAPLIBRE: [[number, number], [number, number]] = [
+  [110.3617, -7.7950], [110.3890, -7.7900],   // MapLibre: [lng, lat] — WAJIB urutan ini
 ];
 
 export default function MapTestCompare() {
@@ -40,7 +43,7 @@ export default function MapTestCompare() {
           tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}'] } },
         layers: [{ id: 'esri', type: 'raster', source: 'esri' }],
       },
-      bounds: BOUNDS,
+      bounds: BOUNDS_MAPLIBRE,
       fitBoundsOptions: { padding: 40 },
     });
     mapRef.current = map;
@@ -65,7 +68,7 @@ export default function MapTestCompare() {
         <div>
           <p className="text-xs font-bold text-zinc-500 mb-1">LEAFLET</p>
           <div className="h-[55vh] rounded-xl overflow-hidden border border-zinc-300">
-            <MapContainer bounds={BOUNDS} style={{ width: '100%', height: '100%' }} scrollWheelZoom>
+            <MapContainer bounds={BOUNDS_LEAFLET} style={{ width: '100%', height: '100%' }} scrollWheelZoom>
               <TileLayer
                 attribution='Tiles © Esri'
                 url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"
