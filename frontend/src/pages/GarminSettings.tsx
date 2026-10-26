@@ -22,6 +22,7 @@ export default function GarminSettings() {
   const [gKeyExp, setGKeyExp] = useState('');
   const [keyExpiredFlag, setKeyExpiredFlag] = useState(false);
   const [keyExpiresAt, setKeyExpiresAt] = useState('');
+  const [connType, setConnType] = useState<'personal' | 'legacy' | null>(null);
 
   const loadStatus = async () => {
     try {
@@ -29,6 +30,7 @@ export default function GarminSettings() {
       setConnected(!!s.data.connected);
       setKeyExpiredFlag(!!s.data.key_expired);
       setKeyExpiresAt(s.data.api_key_expires_at || '');
+      setConnType(s.data.connection || null);
       if (s.data.status?.detail) setLastSync(String(s.data.status.detail).slice(0, 200));
     } catch {
       setConnected(false);
@@ -166,10 +168,18 @@ export default function GarminSettings() {
             </div>
           )}
 
-          {/* Connect form: Personal API (resmi) dulu; tampil saat belum terhubung ATAU key perlu diperbarui */}
-          {(connected === false || showKeyWarning) && (
+          {/* Connect form: Personal API — tampil saat belum terhubung, key perlu diperbarui, ATAU upgrade dari jalur lama */}
+          {(connected === false || showKeyWarning || connType === 'legacy') && (
             <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 p-6 space-y-4">
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Personal API Key <span className="text-[10px] font-bold text-orange-600 dark:text-orange-400">RESMI · DIREKOMENDASIKAN</span></h3>
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+                Personal API Key <span className="text-[10px] font-bold text-orange-600 dark:text-orange-400">RESMI · DIREKOMENDASIKAN</span>
+                {connType === 'legacy' && connected && <span className="ml-2 text-[10px] font-bold text-amber-600 dark:text-amber-400">UPGRADE DARI JALUR LAMA</span>}
+              </h3>
+              {connType === 'legacy' && connected && (
+                <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 rounded-xl px-3 py-2">
+                  Akunmu masih memakai jalur email & password. Tempel Personal API key di bawah → sync otomatis pindah ke jalur resmi (password lama tak dipakai lagi).
+                </p>
+              )}
               <p className="text-xs text-zinc-500 -mt-2">
                 Tanpa email & password — kamu yang mengontrol akses dan bisa cabut kapan pun dari Garmin.
                 Langkah: buka <b>Garmin Connect Web</b> → Profil → <b>Connected Apps / API Keys</b> → <b>Create Personal API Key</b>
