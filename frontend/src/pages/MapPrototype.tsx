@@ -29,36 +29,38 @@ export default function MapPrototype() {
     api.get(`/activities/${id}`)
       .then((r) => {
         setName(r.data?.name || 'Aktivitas');
-        const coords = decodePolyline(r.data?.map_polyline || '');
         const map = mapRef.current;
-        if (!map || coords.length < 2) return;
-        const geojson = {
-          type: 'FeatureCollection' as const,
-          features: [{
-            type: 'Feature' as const,
-            properties: {},
-            geometry: { type: 'LineString' as const, coordinates: coords.map(([la, lo]) => [lo, la]) },
-          }],
+        const inject = () => {
+          const m = mapRef.current;
+          if (!m) return;
+          const coords = decodePolyline(r.data?.map_polyline || '');
+          if (coords.length < 2) return;
+          const geojson = {
+            type: 'FeatureCollection' as const,
+            features: [{
+              type: 'Feature' as const,
+              properties: {},
+              geometry: { type: 'LineString' as const, coordinates: coords.map(([la, lo]) => [lo, la]) },
+            }],
+          };
+          const src = m.getSource('route') as maplibregl.GeoJSONSource | undefined;
+          if (src) { src.setData(geojson); }
+          else {
+            m.addSource('route', { type: 'geojson', data: geojson });
+            m.addLayer({ id: 'route-outline', type: 'line', source: 'route', paint: { 'line-color': '#ffffff', 'line-width': 7, 'line-opacity': 0.9 } });
+            m.addLayer({ id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': '#f97316', 'line-width': 4 } });
+          }
+          const lons = coords.map(([, lo]) => lo);
+          const las = coords.map(([la]) => la);
+          m.fitBounds(
+            [[Math.min(...lons), Math.min(...las)], [Math.max(...lons), Math.max(...las)]],
+            { padding: 48, duration: 800 },
+          );
         };
-        const src = map.getSource('route') as maplibregl.GeoJSONSource | undefined;
-        if (src) src.setData(geojson);
-        else map.addSource('route', { type: 'geojson', data: geojson });
-        if (!map.getLayer('route-outline')) {
-          map.addLayer({
-            id: 'route-outline', type: 'line', source: 'route',
-            paint: { 'line-color': '#ffffff', 'line-width': 7, 'line-opacity': 0.9 },
-          });
-          map.addLayer({
-            id: 'route-line', type: 'line', source: 'route',
-            paint: { 'line-color': '#f97316', 'line-width': 4 },
-          });
-        }
-        const lons = coords.map(([, lo]) => lo);
-        const las = coords.map(([la]) => la);
-        map.fitBounds(
-          [[Math.min(...lons), Math.min(...las)], [Math.max(...lons), Math.max(...las)]],
-          { padding: 48, duration: 800 },
-        );
+        // Rute hanya boleh di-inject SETELAH style selesai dimuat (kontrak MapLibre)
+        if (map && map.isStyleLoaded()) inject();
+        else if (map) map.once('load', inject);
+        else setErr('Peta belum siap — muat ulang halaman.');
       })
       .catch((e: any) => setErr(
         e?.response?.status === 401
