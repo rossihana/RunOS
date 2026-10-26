@@ -161,6 +161,76 @@ def pa_download_fit(token, activity_id, fit_dir):
         fh.write(z.read(names[0]))
     return out
 
+def pa_fit_to_latlng(fit_path):
+    """File .fit -> list [lat, lng] (derajat) dari record GPS. Tanpa GPS → [].
+    position_lat/long di FIT mentah = SEMICIRCLES (bukan derajat!) —
+    konversi: derajat = semicircles × 180 / 2^31 (terverifikasi: -92957780 → -7.80°)."""
+    import fitdecode
+    SEMI = 180.0 / (2 ** 31)
+    latlng = []
+    with fitdecode.FitReader(fit_path) as reader:
+        for frame in reader:
+            if not isinstance(frame, fitdecode.FitDataMessage):
+                continue
+            if frame.name != 'record':
+                continue
+            lat = lon = None
+            for f in frame.fields:
+                if f.name == 'position_lat':
+                    lat = f.value
+                elif f.name == 'position_long':
+                    lon = f.value
+            if lat is not None and lon is not None:
+                latlng.append([round(float(lat) * SEMI, 6), round(float(lon) * SEMI, 6)])
+    return latlng
+
+def pa_sync_polylines(token, runs, fit_dir, conn, max_fetch=30):
+    """Pastikan FIT ada (unduh bila perlu) → parse GPS → polyline → UPDATE map_polyline.
+    Idempoten: FIT yang sudah ada di disk tidak diunduh ulang; polyline lama tak ditimpa
+    kalau hasil parse kosong (treadmill/tanpa GPS)."""
+    import urllib.request
+    import zipfile, io
+    cur = conn.cursor()
+    done = parsed = 0
+    for a in runs:
+        gid = a['activityId']
+        out = os.path.join(fit_dir, f"{gid}.fit")
+        try:
+            if not os.path.exists(out):
+                req = urllib.request.Request(f"{PA_BASE}/download-service/files/activity/{gid}")
+                req.add_header("Authorization", "Bearer " + token)
+                r = urllib.request.urlopen(req, timeout=120)
+                z = zipfile.ZipFile(io.BytesIO(r.read()))
+                names = [n for n in z.namelist() if n.upper().endswith(".FIT")]
+                if not names:
+                    print(f"   - {gid}: FIT tidak tersedia, dilewati")
+                    continue
+                os.makedirs(fit_dir, exist_ok=True)
+                with open(out, "wb") as fh:
+                    fh.write(z.read(names[0]))
+                done += 1
+                time.sleep(1.5)  # limit tak terdokumentasi — jaga sopan santun
+            latlng = pa_fit_to_latlng(out)
+            polyline = encode_polyline(latlng) if latlng else None
+            if polyline:
+                # polyline FIT (Ground Truth, ratusan-ribuan titik) menang atas polyline
+                # legacy yang simplified — bandingkan panjang encoded sebagai proxy detail
+                cur.execute(
+                    """UPDATE activities
+                       SET map_polyline = CASE WHEN length(COALESCE(map_polyline, '')) < length(%s)
+                                               THEN %s ELSE map_polyline END
+                       WHERE garmin_activity_id = %s""",
+                    (polyline, polyline, gid),
+                )
+                parsed += 1
+                print(f"   ✓ {gid}: {len(latlng)} titik GPS")
+            else:
+                print(f"   - {gid}: tanpa GPS (treadmill/di dalam ruangan), dilewati")
+        except Exception as e:
+            print(f"   ✗ {gid}: {type(e).__name__}: {str(e)[:100]}")
+    conn.commit()
+    return done, parsed
+
 def pa_run_sync(args, user_id, conn):
     """Sync lengkap via Personal API: token -> list -> upsert -> FIT (opsional) -> best efforts."""
     key = need("GARMIN_PERSONAL_KEY")
@@ -182,20 +252,9 @@ def pa_run_sync(args, user_id, conn):
 
     if args.details:
         fit_dir = os.environ.get("GARMIN_FIT_DIR") or os.path.join(HERE, ".garmin_fit")
-        ids = [a["activityId"] for a in runs]
-        done = 0
-        for gid in ids:
-            out = os.path.join(fit_dir, f"{gid}.fit")
-            if os.path.exists(out):
-                continue  # idempoten: FIT yang sudah ada tidak diunduh ulang
-            try:
-                pa_download_fit(token, gid, fit_dir)
-                done += 1
-                time.sleep(1.5)  # limit tak terdokumentasi — jaga sopan santun
-                print(f"   ⬇️  FIT {gid}")
-            except Exception as e:
-                print(f"   ✗ FIT {gid}: {type(e).__name__}: {str(e)[:100]}")
-        print(f"📦 {done} file FIT baru disimpan di {fit_dir}")
+        # Fase 3: FIT → parse GPS → polyline peta (idempoten; tanpa GPS dilewati)
+        fetched, parsed = pa_sync_polylines(token, runs, fit_dir, conn)
+        print(f"🗺️  {fetched} FIT diunduh, {parsed} polyline baru")
 
     n = sync_best_efforts(conn, user_id)
     print(f"🏅 Best efforts: {n} evaluasi kategori")

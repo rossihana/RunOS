@@ -150,6 +150,69 @@ r = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath
                    capture_output=True, text=True)
 check("⑤ regresi: test_garmin_sync.py lulus", r.returncode == 0)
 
+# ── ⑥ Fase 3: FIT → GPS → polyline (fixture asli lokal; skip bila tidak ada/fitdecode tak ada) ──
+import importlib.util
+FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".garmin_fit", "111222333.fit")
+if not importlib.util.find_spec("fitdecode"):
+    print("  - ⑥ fitdecode tidak terpasang di interpreter ini — tes FIT dilewati")
+elif os.path.exists(FIXTURE):
+    latlng = gs.pa_fit_to_latlng(FIXTURE)
+    check("⑥ FIT asli: titik GPS > 0", len(latlng) > 0)
+    check("⑥ FIT asli: koordinat dalam rentang masuk akal",
+          all(-90 <= la <= 90 and -180 <= lo <= 180 for la, lo in latlng))
+    poly = gs.encode_polyline(latlng)
+    check("⑥ polyline terenkode non-kosong", len(poly) > 20)
+else:
+    print("  - ⑥ fixture FIT lokal tidak ada (scripts/.garmin_fit/111222333.fit) — tes dilewati")
+
+# ── ⑦⑧ pa_sync_polylines: graceful tanpa GPS & saat FIT rusak ──
+class FakeCursor3:
+    def __init__(self): self.calls = []
+    def execute(self, sql, params=None): self.calls.append((sql, params))
+class FakeConn3:
+    def __init__(self): self.cur = FakeCursor3()
+    def cursor(self): return self.cur
+    def commit(self): pass
+
+tmpdir2 = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".tmp_fit_test2")
+import shutil
+import urllib.request as _ur
+shutil.rmtree(tmpdir2, ignore_errors=True)
+urllib.request.urlopen = orig  # pastikan kondisi bersih dulu
+orig_fit = gs.pa_fit_to_latlng
+
+# ⑦ FIT valid tapi tanpa record GPS → polyline kosong, dilewati
+def fake_zip_ok(req, timeout=0):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("1_ACTIVITY.fit", b"\x0cfit-valid-mock")
+    return FakeResp(buf.getvalue())
+urllib.request.urlopen = fake_zip_ok
+gs.pa_fit_to_latlng = lambda p: []
+try:
+    fc = FakeConn3()
+    fetched, parsed = gs.pa_sync_polylines(FAKE_JWT, [ACT], tmpdir2, fc)
+    check("⑦ tanpa GPS: dilewati tanpa exception, 0 polyline", parsed == 0 and len(fc.cur.calls) == 0)
+finally:
+    gs.pa_fit_to_latlng = orig_fit
+    urllib.request.urlopen = orig
+
+# ⑧ FIT rusak (bukan FIT valid) → error tertangkap, sync lanjut
+def fake_zip_garbage(req, timeout=0):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("1_ACTIVITY.fit", b"\x0cgarbage-not-a-fit")
+    return FakeResp(buf.getvalue())
+urllib.request.urlopen = fake_zip_garbage
+try:
+    shutil.rmtree(tmpdir2, ignore_errors=True)
+    fc = FakeConn3()
+    fetched, parsed = gs.pa_sync_polylines(FAKE_JWT, [ACT], tmpdir2, fc)
+    check("⑧ FIT rusak: error tertangkap, 0 polyline", parsed == 0)
+finally:
+    urllib.request.urlopen = orig
+shutil.rmtree(tmpdir2, ignore_errors=True)
+
 print()
 if failures:
     print(f"❌ GAGAL: {len(failures)} cek:", failures)

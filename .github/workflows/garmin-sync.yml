@@ -58,7 +58,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependensi
-        run: pip install -q garminconnect==0.3.2 psycopg2-binary==2.9.12
+        run: pip install -q garminconnect==0.3.2 psycopg2-binary==2.9.12 fitdecode==0.10.0
 
       # --- kredensial utk dispatch (verify/sync per user) ---
       - name: Ambil kredensial dari backend

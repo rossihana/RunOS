@@ -30,3 +30,7 @@ graphify-out/
 logo-redesign/*
 !logo-redesign/logo-open-track/
 logo-redesign/logo-open-track/renders/
+
+# fixture FIT lokal (data GPS pribadi — jangan masuk repo publik)
+scripts/.garmin_fit/
+scripts/.tmp_fit_test*/
