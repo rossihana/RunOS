@@ -270,8 +270,10 @@ router.get('/:id', authenticate, validateRequest(activityIdSchema), catchAsync(a
   const userId = req.user?.id;
 
   // 1. Fetch Activity Details
+  // id bisa = ID internal RunOS (integer) ATAU Garmin activity ID (64-bit, melebihi range
+  // INT4 — bandingkan sebagai text supaya tidak overflow, kasus nyata 24840984411)
   const actResult = await query(
-    'SELECT * FROM activities WHERE id = $1 AND user_id = $2',
+    'SELECT * FROM activities WHERE user_id = $2 AND (id::text = $1 OR garmin_activity_id::text = $1)',
     [activityId, userId]
   );
 
