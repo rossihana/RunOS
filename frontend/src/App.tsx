@@ -46,6 +46,7 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/terms" element={<Terms />} />
+            <Route path="/map-test-compare" element={<MapTestCompare />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/reset-password" element={<ResetPassword />} />
@@ -65,7 +66,6 @@ export default function App() {
             </Route>
             <Route path="map-test" element={<MapTest />} />
             <Route path="map-compare/:id" element={<MapCompare />} />
-            <Route path="map-test-compare" element={<MapTestCompare />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
