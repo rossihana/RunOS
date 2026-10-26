@@ -25,7 +25,7 @@ export default function Privacy() {
         <ul className="space-y-1 mb-2">
           <li className={li}>Menampilkan analitik, prediksi race, dan saran pelatihan untuk <b>kamu sendiri</b>.</li>
           <li className={li}>Data lari milikmu <b>tidak pernah dilihat oleh user lain</b>, tidak dijual, tidak dibagikan ke pihak ketiga untuk marketing.</li>
-          <li className={li}>Kredensial Garmin hanya dipakai server untuk login sesi sync — tidak dipakai untuk mengubah apa pun di akun Garmin-mu (read-only).</li>
+          <li className={li}>Kredensial/key Garmin hanya dipakai server untuk menarik data (read-only) — tidak dipakai untuk mengubah apa pun di akun Garmin-mu (read-only).</li>
         </ul>
 
         <h2 className={h2}>3. Pemroses Data</h2>
@@ -43,21 +43,21 @@ export default function Privacy() {
 
         <h2 className={h2}>6. Penyimpanan & Keamanan</h2>
         <ul className="space-y-1 mb-2">
-          <li className={li}>Password RunOS: hash scrypt. Password Garmin: AES-256-GCM terenkripsi, kunci enkripsi disimpan terpisah dari database.</li>
+          <li className={li}>Password RunOS: hash scrypt. Kredensial/key Garmin: jalur lama (password) dan Personal API key sama-sama terenkripsi AES-256-GCM, kunci enkripsi disimpan terpisah dari database.</li>
           <li className={li}>Koneksi database diamankan TLS (terenkripsi saat lewat jaringan); penyedia database mengenkripsi data saat disimpan di disk.</li>
           <li className={li}>Data dicadangkan otomatis setiap hari dalam bentuk <b>terenkripsi</b> dengan kunci yang disimpan terpisah dari database; cadangan disimpan maksimal 90 hari lalu dihapus otomatis.</li>
-          <li className={li}>Sesi sync Garmin per-user terisolasi (token per user, tidak bercampur); log proses sinkronisasi disamarkan untuk kredensial.</li>
+          <li className={li}>Sesi sync Garmin per-user terisolasi (token/API key per user, tidak bercampur); log proses sinkronisasi disamarkan untuk kredensial.</li>
           <li className={li}>Koneksi seluruh layanan menggunakan HTTPS/TLS.</li>
-          <li className={li}>Kami tidak bisa dan tidak akan menampilkan password Garmin-mu kembali — kalau lupa, cukup disconnect lalu reconnect.</li>
+          <li className={li}>Kami tidak bisa dan tidak akan menampilkan kredensial/key Garmin-mu kembali — kalau lupa, cukup disconnect lalu reconnect (atau buat API key baru).</li>
           <li className={li}>Tidak ada sistem yang 100% aman; kami berupaya memperbaiki kerentanan secepatnya bila ditemukan.</li>
         </ul>
 
         <h2 className={h2}>7. Retensi</h2>
-        <p className={p}>Chat AI otomatis terhapus setelah 30 hari. Data aktivitas disimpan selama akunmu aktif. Saat akun dihapus, seluruh data terkait (aktivitas, kredensial Garmin, riwayat chat) ikut dihapus dari database.</p>
+        <p className={p}>Chat AI otomatis terhapus setelah 30 hari. Data aktivitas disimpan selama akunmu aktif. Saat akun dihapus, seluruh data terkait (aktivitas, kredensial/key Garmin, riwayat chat) ikut dihapus dari database.</p>
 
         <h2 className={h2}>8. Hak Kamu</h2>
         <ul className="space-y-1 mb-2">
-          <li className={li}><b>Disconnect</b> — putuskan koneksi Garmin; kredensial dihapus dari database.</li>
+          <li className={li}><b>Disconnect</b> — putuskan koneksi Garmin; kredensial/key dihapus dari database.</li>
           <li className={li}><b>Hapus akun & data</b> — minta penghapusan akun beserta seluruh data lari, PR, dan chat AI.</li>
           <li className={li}><b>Export</b> — minta salinan data aktivitasmu.</li>
         </ul>
