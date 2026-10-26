@@ -19,7 +19,7 @@ export default function GarminSettings() {
   const [loading, setLoading] = useState(true);
   const [lastSync, setLastSync] = useState('');
   const [gKey, setGKey] = useState('');
-  const [gKeyExp, setGKeyExp] = useState('');
+  const [gKeyDur, setGKeyDur] = useState(365);
   const [keyExpiredFlag, setKeyExpiredFlag] = useState(false);
   const [keyExpiresAt, setKeyExpiresAt] = useState('');
   const [connType, setConnType] = useState<'personal' | 'legacy' | null>(null);
@@ -45,11 +45,13 @@ export default function GarminSettings() {
     if (!acceptTerms) { setMsg('⚠️ Setujui Terms of Service & Privacy Policy dulu untuk melanjutkan.'); return; }
     setBusy('connect'); setMsg('');
     try {
+      // Garmin tak menampilkan tanggal kedaluwarsa → hitung dari durasi yang dipilih user
+      const exp = new Date(Date.now() + gKeyDur * 86_400_000).toISOString().slice(0, 10);
       await api.post('/activities/garmin/connect-api-key', {
-        apiKey: gKey, expiresAt: gKeyExp || null, acceptTerms: true,
+        apiKey: gKey, expiresAt: exp, acceptTerms: true,
       });
       setConnected(true);
-      setGKey(''); setGKeyExp('');
+      setGKey('');
       setMsg('✅ Garmin terhubung via Personal API resmi! Sync harian otomatis aktif (tiap pagi 07:00).');
       await loadStatus();
     } catch (e: any) {
@@ -190,11 +192,18 @@ export default function GarminSettings() {
                 placeholder="Personal API Key (tampil sekali di Garmin — salin & simpan)"
                 className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
               />
-              <input
-                type="date" value={gKeyExp} onChange={e => setGKeyExp(e.target.value)}
+              <select
+                value={gKeyDur} onChange={e => setGKeyDur(Number(e.target.value))}
                 className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
-              />
-              <p className="text-[10px] text-zinc-400 -mt-2">Tanggal kedaluwarsa key (sesuai yang kamu pilih saat membuat — opsional tapi disarankan, jadi kami bisa ingatkan).</p>
+              >
+                <option value={30}>Masa berlaku key: 30 hari</option>
+                <option value={90}>Masa berlaku key: 90 hari</option>
+                <option value={180}>Masa berlaku key: 180 hari</option>
+                <option value={365}>Masa berlaku key: 1 tahun</option>
+              </select>
+              <p className="text-[10px] text-zinc-400 -mt-2">
+                Pilih durasi yang <b>sama</b> dengan yang kamu pilih saat membuat key di Garmin (Garmin tidak menampilkan tanggalnya — kami hitung & ingatkan).
+              </p>
 
               <label className="flex items-start gap-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 px-3 py-3 cursor-pointer">
                 <input
