@@ -43,6 +43,9 @@ if os.environ.get("GARMIN_EMAIL"):
     ENV["GARMIN_EMAIL"] = os.environ["GARMIN_EMAIL"]
 if os.environ.get("GARMIN_PASSWORD"):
     ENV["GARMIN_PASSWORD"] = os.environ["GARMIN_PASSWORD"]
+# Personal API (BYOK): key per user via environment / garmin_sync.env
+if os.environ.get("GARMIN_PERSONAL_KEY"):
+    ENV["GARMIN_PERSONAL_KEY"] = os.environ["GARMIN_PERSONAL_KEY"]
 # owner tokenstore tetap default; per-user tokenstore via GARMIN_TOKENSTORE_DIR
 
 def need(key):
@@ -87,6 +90,115 @@ def login_garmin(c, label=""):
         pass
     print(f"✅ Login Garmin ok{label}")
     return c
+
+# ─── Garmin Connect Personal API (resmi) — jalur BYOK per user ───
+# Kontrak empiris 2026-10-26 (lihat docs/research/garmin-personal-api.md):
+# - respons token = JWT PLAIN-TEXT (bukan JSON)
+# - FIT download = ZIP berisi <id>_ACTIVITY.fit
+# - field list sama dengan garminconnect → map_summary() dipakai ulang
+PA_BASE = "https://personal.connectapi.garmin.com"
+PA_TOKEN_URL = PA_BASE + "/personalapitoken-service/personal-api/personal-api-key/token"
+
+def mint_pa_token(key):
+    """API key -> access token. Key TIDAK pernah ikut dalam pesan error."""
+    import urllib.request, urllib.error
+    req = urllib.request.Request(PA_TOKEN_URL, method="POST")
+    req.add_header("Authorization", "ApiKey " + key)
+    try:
+        r = urllib.request.urlopen(req, timeout=30)
+        tok = r.read().decode("utf-8", "ignore").strip()
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"❌ Mint token Personal API gagal: HTTP {e.code} (periksa GARMIN_PERSONAL_KEY)")
+    except Exception as e:
+        raise SystemExit(f"❌ Mint token Personal API gagal: {type(e).__name__}")
+    if not tok or tok.count(".") < 2:
+        raise SystemExit("❌ Respons token Personal API tidak berbentuk JWT")
+    return tok
+
+def pa_get(token, path, timeout=60):
+    import urllib.request
+    req = urllib.request.Request(PA_BASE + path)
+    req.add_header("Authorization", "Bearer " + token)
+    r = urllib.request.urlopen(req, timeout=timeout)
+    b = r.read()
+    return json.loads(b) if b[:1] in (b"{", b"[") else b
+
+def pa_activity_type_key(a):
+    t = a.get("activityType")
+    return t.get("typeKey") if isinstance(t, dict) else t
+
+def pa_fetch_runs(token, max_pages=50):
+    """List aktivitas lari, paginasi 100/halaman, tanpa duplikat (guard activityId)."""
+    runs, seen, start, page = [], set(), 0, 0
+    while page < max_pages:
+        page += 1
+        batch = pa_get(token, f"/activitylist-service/activities/search/activities?start={start}&limit=100")
+        if not batch:
+            break
+        for a in batch:
+            aid = a.get("activityId")
+            if pa_activity_type_key(a) == "running" and aid not in seen:
+                seen.add(aid)
+                runs.append(a)
+        if len(batch) < 100:
+            break
+        start += len(batch)
+    return runs
+
+def pa_download_fit(token, activity_id, fit_dir):
+    """Unduh file FIT (respons = ZIP) -> simpan .fit mentah. Return path / None."""
+    import zipfile, io, urllib.request
+    req = urllib.request.Request(f"{PA_BASE}/download-service/files/activity/{activity_id}")
+    req.add_header("Authorization", "Bearer " + token)
+    r = urllib.request.urlopen(req, timeout=120)
+    z = zipfile.ZipFile(io.BytesIO(r.read()))
+    names = [n for n in z.namelist() if n.upper().endswith(".FIT")]
+    if not names:
+        return None
+    os.makedirs(fit_dir, exist_ok=True)
+    out = os.path.join(fit_dir, f"{activity_id}.fit")
+    with open(out, "wb") as fh:
+        fh.write(z.read(names[0]))
+    return out
+
+def pa_run_sync(args, user_id, conn):
+    """Sync lengkap via Personal API: token -> list -> upsert -> FIT (opsional) -> best efforts."""
+    key = need("GARMIN_PERSONAL_KEY")
+    token = mint_pa_token(key)
+    print("✅ Token Personal API ok (24 jam)")
+
+    runs = pa_fetch_runs(token)
+    if args.days:
+        import datetime
+        cutoff = datetime.date.today() - datetime.timedelta(days=args.days)
+        runs = [a for a in runs if (a.get("startTimeGMT") or "")[:10] >= cutoff.isoformat()]
+    print(f"🏃 {len(runs)} aktivitas lari via Personal API")
+
+    cur = conn.cursor()
+    for a in runs:
+        cur.execute(UPSERT_SQL, (user_id,) + map_summary(a)[:15] + (None, False))
+    conn.commit()
+    print(f"⬆️  {len(runs)} aktivitas tersimpan (user_id={user_id})")
+
+    if args.details:
+        fit_dir = os.environ.get("GARMIN_FIT_DIR") or os.path.join(HERE, ".garmin_fit")
+        ids = [a["activityId"] for a in runs]
+        done = 0
+        for gid in ids:
+            out = os.path.join(fit_dir, f"{gid}.fit")
+            if os.path.exists(out):
+                continue  # idempoten: FIT yang sudah ada tidak diunduh ulang
+            try:
+                pa_download_fit(token, gid, fit_dir)
+                done += 1
+                time.sleep(1.5)  # limit tak terdokumentasi — jaga sopan santun
+                print(f"   ⬇️  FIT {gid}")
+            except Exception as e:
+                print(f"   ✗ FIT {gid}: {type(e).__name__}: {str(e)[:100]}")
+        print(f"📦 {done} file FIT baru disimpan di {fit_dir}")
+
+    n = sync_best_efforts(conn, user_id)
+    print(f"🏅 Best efforts: {n} evaluasi kategori")
 
 # ─── Mapping Garmin -> skema RunOS ───
 
@@ -528,10 +640,40 @@ def main():
     ap.add_argument("--health", action="store_true", help="ambil HRV/sleep/VO2max/stress/prediksi Garmin (jendela auto: 30 jika kosong, 7 jika fresh)")
     ap.add_argument("--health-days", type=int, default=None, help="paksa jendela sync health N hari (default: auto)")
     ap.add_argument("--verify-only", action="store_true", help="BUG-6: cek kredensial login valid, tanpa sync (dipakai saat connect)")
+    ap.add_argument("--personal", action="store_true", help="jalur Personal API resmi (GARMIN_PERSONAL_KEY wajib)")
+    ap.add_argument("--verify-personal", action="store_true", help="self-test Personal API: mint token + tarik 1 aktivitas, tanpa sync")
     ap.add_argument("--user-id", type=int, default=None, help="bind data ke user_id eksplisit (default: user dengan aktivitas terbanyak)")
     args = ap.parse_args()
     # Clamp hari di batas CLI (defense-in-depth terhadap parameter tak terbatas; lihat clampDays TS)
-    args.days = max(1, min(int(args.days), 365))
+    if args.days is not None:
+        args.days = max(1, min(int(args.days), 365))
+
+    if args.verify_personal:
+        tok = mint_pa_token(need("GARMIN_PERSONAL_KEY"))
+        acts = pa_get(tok, "/activitylist-service/activities/search/activities?start=0&limit=1")
+        if not acts:
+            raise SystemExit("❌ Personal API: tidak ada aktivitas — token ok tapi data kosong?")
+        a = acts[0]
+        print(f"✅ Personal API OK: 1 aktivitas sampel (id={a.get('activityId')}, "
+              f"jarak={round((a.get('distance') or 0), 1)}m, type={pa_activity_type_key(a)})")
+        print("VERIFY_PERSONAL_OK")
+        return
+
+    # Jalur Personal API dipilih bila: --personal eksplisit, ATAU key tersedia
+    # dan kredensial legacy tidak disuntik (mis. mode dispatch owner tanpa email).
+    want_personal = args.personal or (
+        (ENV.get("GARMIN_PERSONAL_KEY") or os.environ.get("GARMIN_PERSONAL_KEY"))
+        and not os.environ.get("GARMIN_EMAIL")
+    )
+    if want_personal and not args.verify_only:
+        if args.health:
+            print("⚠️  --health belum tersedia di jalur Personal API (Fase lanjutan) — dilewati")
+        conn = get_db()
+        user_id = get_user_id(conn, args.user_id)
+        pa_run_sync(args, user_id, conn)
+        conn.close()
+        print("✅ Selesai (Personal API)")
+        return
 
     if args.verify_only:
         from garminconnect import Garmin

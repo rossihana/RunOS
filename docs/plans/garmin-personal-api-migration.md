@@ -15,6 +15,8 @@ Sync Garmin RunOS berpindah dari jalur kredensial (email+password via `garmincon
 
 ## Keputusan yang harus dikunci dulu (sebelum Fase 1)
 
+> ✅ **Dikunci 2026-10-26** — semua sesuai rekomendasi: K1 `fitdecode` · K2 owner dulu · K3 pola `garminPerUser.ts` · K4 notifikasi kedaluwarsa.
+
 | # | Keputusan | Opsi | Rekomendasi |
 |---|---|---|---|
 | K1 | Parser FIT | `fitdecode` (pure-python, matang) vs `garmin-fit-sdk` (resmi Garmin, butuh SDK binary) | `fitdecode` — cukup untuk polyline + mudah di GHA |
@@ -63,6 +65,50 @@ Sync Garmin RunOS berpindah dari jalur kredensial (email+password via `garmincon
 - [ ] Update `docs/research/garmin-personal-api.md` → status "terimplementasi".
 
 **Kriteria selesai:** tidak ada satu pun password Garmin tersimpan; semua sync lewat Personal API; dokumentasi akurat.
+
+## Gerbang keamanan per fase (wajib lulus sebelum lanjut)
+
+Setiap fase ditutup dengan audit yang sama, plus gerbang khusus fasenya:
+
+**Audit standar tiap akhir fase (checklist):**
+1. **Scan secret**: `git grep` + scan working tree untuk nilai key/token/password/DSN — nol kecocokan
+2. **Scan penghapusan**: `git status` + `git diff --stat` — tidak ada file/data yang hilang tanpa disengaja
+3. **Dua jalur sehat**: sync jalur lama SUKSES terakhir + jalur baru lulus self-test
+4. **DB**: backup harian terenkripsi sukses (backup-db.yml) SEBELUM dan SESUDAH fase
+5. **Log GHA**: tidak ada nilai sensitif ter-echo di log workflow (scan log run terakhir)
+
+**Gerbang khusus:**
+
+| Fase | Gerbang tambahan |
+|---|---|
+| Fase 1 (adapter) | Adapter menulis **hanya-baca ke Garmin** (GET/mint token saja — sudah jadi kontrak) · idempotensi tulis DB: `activityId` unik, tak boleh duplikat dengan jalur lama · secret GHA diset via `gh secret set`, tidak pernah lewat chat/log |
+| Fase 2 (UI/settings) | Key user tersimpan terenkripsi (verifikasi: query DB, ciphertext bukan plaintext) · respons API TIDAK PERNAH memuat key/token (test otomatis) · user jalur lama lolos sync normal |
+| Fase 3 (rute GPS) | FIT diunduh + diparse **read-only** · aktivitas treadmill/tanpa GPS → `hasPolyline=false`, tak ada crash · jumlah polyline lama TIDAK berubah |
+| Fase 4 (pembongkaran) | **Snapshot backup manual + verifikasi restore** sebelum menyentuh kolom password · semua user sudah di Personal API ≥2 minggu hijau · audit final: `SELECT count(*) WHERE garmin_password_enc IS NOT NULL` = **0** baru kolom di-nol-kan |
+
+## Pemantauan pasca-migrasi (permanen)
+
+| Interval | Cek | Cara |
+|---|---|---|
+| Per sync (harian) | GHA garmin-sync sukses; 0 error 401/429 | Status workflow otomatis + badge gagal di UI |
+| Mingguan | Scan secret repo (pola key/JWT/password) + `.env*` masih di-gitignore | Script scan sederhana atau gitleaks |
+| Mingguan | Kontinuitas data: jumlah aktivitas minggu ini > 0 (kalau user aktif lari) — gap = sync diam tanpa alasan | Query DB sederhana |
+| 7 hari sebelum key user kedaluwarsa | Badge + email pengingat (K4) | Cron cek `garmin_api_key_expires_at` |
+| Bulanan | Audit: tidak ada plaintext kredensial di DB; jumlah user jalur kredensial lama menurun ke 0 | Query audit |
+| Kapan pun dibutuhkan | **Rollback**: jalur lama dihapus hanya di Fase 4; sebelum itu, key lama bisa dibuat ulang user dalam 1 menit (buat key baru → tempel) | Prosedur terdokumentasi |
+
+## Pengujian — kontrak per fase (tes otomatis, bukan cek manual)
+
+Prinsip: **tes jalan tanpa jaringan** (fixture rekaman respons nyata dari tes empiris 2026-10-26 — token plain-text, list 96-field, envelope detail, ZIP FIT) supaya CI/GHA tidak bergantung akun hidup. Tes empiris live hanya untuk validasi akhir fase.
+
+| Fase | Tes yang wajib ada & lulus |
+|---|---|
+| Fase 1 (adapter) | ① Parse token: respons plain-text JWT → token benar; respons error → pesan jelas (tanpa echo key) ② Pemetaan field: fixture list-respons nyata → baris DB dengan nilai persis (distance 7188.46 → 7.19 km dst.) ③ Idempotensi: sync 2× fixture sama → baris DB tetap N, bukan 2N ④ Paginasi: fixture 3 halaman → total gabungan benar, tak ada duplikat ⑤ **Regresi jalur lama**: `scripts/test_garmin_sync.py` yang existing tetap lulus tanpa diubah |
+| Fase 2 (UI/settings) | ① Key tersimpan = ciphertext (assert bukan `ghp_`/plaintext prefix) ② Respons `GET /api/activities/garmin/*` **tidak mengandung** substring key/token (assert otomatis) ③ Kedaluwarsa: key dengan `expires_at` kemarin → status "kedaluwarsa", bukan crash ④ User jalur lama: alur lama lulus semua test existing |
+| Fase 3 (rute GPS) | ① Fixture ZIP FIT nyata (116 KB) → unzip → jumlah titik GPS > 0 ② FIT tanpa GPS (treadmill fixture) → polyline kosong + status aman, tanpa exception ③ Polyline terenkode valid (parse balik → koordinat dalam rentang masuk akal) ④ Polyline aktivitas jalur lama tak berubah |
+| Fase 4 (pembongkaran) | ① Audit query: count password tersisa = 0 (assert di skrip fase) ② Semua test Fase 1–3 masih hijau setelah kode lama dihapus ③ Dry-run delete di DB staging/copy dulu, baru produksi |
+
+**Aturan gerbang**: checklist keamanan di atas **dan** semua test fase = hijau, baru fase dinyatakan selesai. Tes live (akun nyata) dijalankan sekali per fase sebagai validasi akhir, hasilnya dicatat di commit message.
 
 ## Risiko & mitigasi
 

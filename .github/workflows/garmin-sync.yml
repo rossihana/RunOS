@@ -13,6 +13,12 @@ on:
         options: [sync, verify, schedule]
         default: sync
         required: true
+      backend:
+        type: choice
+        options: [legacy, personal]
+        default: legacy
+        description: "personal = Garmin Personal API resmi (butuh secret GARMIN_PERSONAL_KEY; K2: owner dulu)"
+        required: false
       user_id:
         type: string
         required: false
@@ -108,11 +114,17 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.RUNOS_DATABASE_URL }}
           GARMIN_TOKENSTORE_DIR: ${{ github.workspace }}/tokenstore
+          GARMIN_PERSONAL_KEY: ${{ secrets.GARMIN_PERSONAL_KEY }}
         run: |
           extra=""
           [ -n "${{ inputs.days }}" ] && extra="--days ${{ inputs.days }}"
           [ "${{ inputs.details }}" = "true" ] && extra="$extra --details --max-detail 30"
-          [ "${{ inputs.health }}" = "true" ] && extra="$extra --health"
+          # jalur personal (K2: owner dulu) — flag eksplisit; --health dilewati script (belum didukung)
+          if [ "${{ inputs.backend }}" = "personal" ]; then
+            extra="$extra --personal"
+          elif [ "${{ inputs.health }}" = "true" ]; then
+            extra="$extra --health"
+          fi
           python scripts/garmin_sync.py --user-id "${{ inputs.user_id }}" $extra
 
       # --- jadwal harian: loop serial semua user terhubung (1 login pada 1 waktu) ---
