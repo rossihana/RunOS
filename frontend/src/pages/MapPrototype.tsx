@@ -60,7 +60,13 @@ export default function MapPrototype() {
           { padding: 48, duration: 800 },
         );
       })
-      .catch(() => setErr('Gagal memuat aktivitas (login dulu / id salah).'));
+      .catch((e: any) => setErr(
+        e?.response?.status === 401
+          ? 'Belum login / sesi habis — buka halaman ini di tab yang sama dengan saat kamu memakai Dashboard.'
+          : e?.response?.status === 404
+            ? 'Aktivitas tidak ditemukan untuk akun ini.'
+            : `Gagal memuat aktivitas (HTTP ${e?.response?.status || '??'}).`
+      ));
   }, [id]);
 
   // buat peta sekali
