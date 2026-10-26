@@ -18,11 +18,17 @@ export default function GarminSettings() {
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
   const [lastSync, setLastSync] = useState('');
+  const [gKey, setGKey] = useState('');
+  const [gKeyExp, setGKeyExp] = useState('');
+  const [keyExpiredFlag, setKeyExpiredFlag] = useState(false);
+  const [keyExpiresAt, setKeyExpiresAt] = useState('');
 
   const loadStatus = async () => {
     try {
       const s = await api.get('/activities/garmin/status');
       setConnected(!!s.data.connected);
+      setKeyExpiredFlag(!!s.data.key_expired);
+      setKeyExpiresAt(s.data.api_key_expires_at || '');
       if (s.data.status?.detail) setLastSync(String(s.data.status.detail).slice(0, 200));
     } catch {
       setConnected(false);
@@ -32,6 +38,32 @@ export default function GarminSettings() {
   };
 
   useEffect(() => { loadStatus(); }, []);
+
+  const connectApiKey = async () => {
+    if (!acceptTerms) { setMsg('⚠️ Setujui Terms of Service & Privacy Policy dulu untuk melanjutkan.'); return; }
+    setBusy('connect'); setMsg('');
+    try {
+      await api.post('/activities/garmin/connect-api-key', {
+        apiKey: gKey, expiresAt: gKeyExp || null, acceptTerms: true,
+      });
+      setConnected(true);
+      setGKey(''); setGKeyExp('');
+      setMsg('✅ Garmin terhubung via Personal API resmi! Sync harian otomatis aktif (tiap pagi 07:00).');
+      await loadStatus();
+    } catch (e: any) {
+      setMsg(`⚠️ ${e?.response?.data?.error || 'Gagal menghubungkan'}`);
+    } finally { setBusy(null); }
+  };
+
+  // Badge kedaluwarsa: tampil kalau key_expired, atau ≤14 hari lagi
+  const expSoon = (() => {
+    if (!keyExpiresAt) return false;
+    const d = new Date(keyExpiresAt + 'T00:00:00');
+    if (isNaN(d.getTime())) return false;
+    const days = (d.getTime() - Date.now()) / 86_400_000;
+    return days <= 14;
+  })();
+  const showKeyWarning = connected && (keyExpiredFlag || expSoon);
 
   const connect = async () => {
     if (!acceptTerms) { setMsg('⚠️ Setujui Terms of Service & Privacy Policy dulu untuk melanjutkan.'); return; }
@@ -127,45 +159,93 @@ export default function GarminSettings() {
             )}
           </div>
 
-          {/* Connect form (hanya saat belum terhubung) */}
-          {connected === false && (
+          {/* Peringatan key kedaluwarsa / hampir kedaluwarsa (Personal API) */}
+          {showKeyWarning && (
+            <div className="rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-xs text-amber-800 dark:text-amber-200">
+              ⚠️ API key Garmin-mu <b>{keyExpiredFlag ? 'SUDAH kedaluwarsa' : `kedaluwarsa ${keyExpiresAt}`}</b> — perbarui di bawah agar sync tidak berhenti. Email pengingat juga dikirim Garmin ±1 minggu sebelumnya.
+            </div>
+          )}
+
+          {/* Connect form: Personal API (resmi) dulu; tampil saat belum terhubung ATAU key perlu diperbarui */}
+          {(connected === false || showKeyWarning) && (
             <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 p-6 space-y-4">
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Kredensial Garmin</h3>
-              <p className="text-xs text-zinc-400 -mt-2">
-                Sama dengan yang kamu pakai login di aplikasi Garmin Connect. Password disimpan <span className="font-semibold text-zinc-500">terenkripsi</span> di server dan tidak pernah dikirim balik.
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Personal API Key <span className="text-[10px] font-bold text-orange-600 dark:text-orange-400">RESMI · DIREKOMENDASIKAN</span></h3>
+              <p className="text-xs text-zinc-500 -mt-2">
+                Tanpa email & password — kamu yang mengontrol akses dan bisa cabut kapan pun dari Garmin.
+                Langkah: buka <b>Garmin Connect Web</b> → Profil → <b>Connected Apps / API Keys</b> → <b>Create Personal API Key</b>
+                (pilih masa berlaku) → tempel key-nya di sini.
               </p>
               <input
-                type="email" value={gEmail} onChange={e => setGEmail(e.target.value)}
-                placeholder="Email Garmin"
+                type="password" value={gKey} onChange={e => setGKey(e.target.value)}
+                placeholder="Personal API Key (tampil sekali di Garmin — salin & simpan)"
                 className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
               />
               <input
-                type="password" value={gPass} onChange={e => setGPass(e.target.value)}
-                placeholder="Password Garmin"
-                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                type="date" value={gKeyExp} onChange={e => setGKeyExp(e.target.value)}
+                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
               />
+              <p className="text-[10px] text-zinc-400 -mt-2">Tanggal kedaluwarsa key (sesuai yang kamu pilih saat membuat — opsional tapi disarankan, jadi kami bisa ingatkan).</p>
 
-              {/* ToS gate */}
               <label className="flex items-start gap-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 px-3 py-3 cursor-pointer">
                 <input
                   type="checkbox" checked={acceptTerms} onChange={e => setAcceptTerms(e.target.checked)}
                   className="mt-0.5 w-4 h-4 rounded accent-orange-600 shrink-0"
                 />
                 <span className="text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-400">
-                  Aku mengizinkan RunOS memakai email &amp; password Garmin-ku untuk sinkronisasi data (tersimpan terenkripsi, read-only), dan aku menyetujui{' '}
+                  Aku mengizinkan RunOS mengakses <b>data Garmin-ku sendiri</b> via Personal API resmi (read-only, key tersimpan terenkripsi, bisa dicabut kapan pun dari Garmin), dan aku menyetujui{' '}
                   <Link to="/terms" target="_blank" className="font-semibold text-orange-600 hover:underline">Terms of Service</Link> serta{' '}
                   <Link to="/privacy" target="_blank" className="font-semibold text-orange-600 hover:underline">Privacy Policy</Link> RunOS.
                 </span>
               </label>
 
               <button
-                onClick={connect}
-                disabled={busy !== null || !gEmail || !gPass || !acceptTerms}
+                onClick={connectApiKey}
+                disabled={busy !== null || !gKey || !acceptTerms}
                 className="w-full py-3 rounded-xl bg-orange-600 text-white text-sm font-bold hover:bg-orange-700 disabled:opacity-40 transition-colors"
               >
-                {busy === 'connect' ? 'Menghubungkan…' : 'Hubungkan Garmin'}
+                {busy === 'connect' ? 'Menghubungkan…' : 'Hubungkan via Personal API'}
               </button>
               <p className="text-[10px] text-zinc-400 text-center">Data sync pertama bisa memakan 1–3 menit untuk seluruh riwayat.</p>
+
+              <details className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                <summary className="text-[11px] text-zinc-400 cursor-pointer select-none">Alternatif: email & password (jalur lama, tidak direkomendasikan)</summary>
+                <div className="space-y-4 pt-4">
+                  <div>
+                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Kredensial Garmin</h3>
+                    <p className="text-xs text-zinc-400 -mt-2">
+                      Sama dengan yang kamu pakai login di aplikasi Garmin Connect. Password disimpan <span className="font-semibold text-zinc-500">terenkripsi</span> di server dan tidak pernah dikirim balik.
+                    </p>
+                    <input
+                      type="email" value={gEmail} onChange={e => setGEmail(e.target.value)}
+                      placeholder="Email Garmin"
+                      className="mt-2 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                    />
+                    <input
+                      type="password" value={gPass} onChange={e => setGPass(e.target.value)}
+                      placeholder="Password Garmin"
+                      className="mt-2 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                    />
+                  </div>
+                  <label className="flex items-start gap-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 px-3 py-3 cursor-pointer">
+                    <input
+                      type="checkbox" checked={acceptTerms} onChange={e => setAcceptTerms(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded accent-orange-600 shrink-0"
+                    />
+                    <span className="text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-400">
+                      Aku mengizinkan RunOS memakai email & password Garmin-ku untuk sinkronisasi data (tersimpan terenkripsi, read-only), dan aku menyetujui{' '}
+                      <Link to="/terms" target="_blank" className="font-semibold text-orange-600 hover:underline">Terms of Service</Link> serta{' '}
+                      <Link to="/privacy" target="_blank" className="font-semibold text-orange-600 hover:underline">Privacy Policy</Link> RunOS.
+                    </span>
+                  </label>
+                  <button
+                    onClick={connect}
+                    disabled={busy !== null || !gEmail || !gPass || !acceptTerms}
+                    className="w-full py-3 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-bold hover:opacity-90 disabled:opacity-40 transition-colors"
+                  >
+                    Hubungkan (jalur lama)
+                  </button>
+                </div>
+              </details>
             </div>
           )}
 

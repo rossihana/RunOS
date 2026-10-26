@@ -329,15 +329,30 @@ router.post('/garmin/internal-creds', catchAsync(async (req: Request, res: Respo
   // {"list":true} → daftar user terhubung (dipakai workflow mode=schedule / cron 07:00 WIB)
   if (req.body?.list === true || req.body?.list === 'true') {
     const r = await query(
-      `SELECT id FROM users WHERE garmin_email IS NOT NULL AND garmin_connected_at IS NOT NULL ORDER BY id`
+      `SELECT id FROM users
+       WHERE garmin_connected_at IS NOT NULL AND (garmin_email IS NOT NULL OR garmin_api_key_enc IS NOT NULL)
+       ORDER BY id`
     );
     res.set('Cache-Control', 'no-store');
     return res.json({ user_ids: r.rows.map((x: any) => x.id) });
   }
-  const creds = await m.loadCredentials(Number(req.body?.user_id));
+  const uid = Number(req.body?.user_id);
+  // Migrasi Fase 2: user dengan Personal API key → kirim api_key (bukan kredensial legacy)
+  const apiKey = await m.loadGarminApiKey(uid);
+  if (apiKey) {
+    res.set('Cache-Control', 'no-store');
+    return res.json({ api_key: apiKey.apiKey });
+  }
+  const creds = await m.loadCredentials(uid);
   if (!creds) return res.status(404).json({ error: 'kredensial tidak ada' });
   res.set('Cache-Control', 'no-store');
   res.json(creds);
+}));
+
+// ─── Koneksi Garmin via Personal API key (resmi; Fase 2 migrasi) ───
+router.post('/garmin/connect-api-key', authenticate, catchAsync(async (req: AuthRequest, res: Response) => {
+  const m = await import('../services/garminPerUser.js');
+  return m.connectApiKeyHandler(req, res);
 }));
 
 router.post('/garmin/internal-verify-result', catchAsync(async (req: Request, res: Response) => {

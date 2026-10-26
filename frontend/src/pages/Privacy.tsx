@@ -15,7 +15,7 @@ export default function Privacy() {
         <h2 className={h2}>1. Data yang Kami Kumpulkan</h2>
         <ul className="space-y-1 mb-2">
           <li className={li}><b>Email & password RunOS</b> — untuk login (password disimpan sebagai hash scrypt).</li>
-          <li className={li}><b>Email & password Garmin Connect</b> — hanya untuk sinkronisasi data; password disimpan terenkripsi AES-256-GCM.</li>
+          <li className={li}><b>Akses Garmin Connect</b> — dua jalur: (a) <b>Personal API Key resmi</b> yang kamu buat sendiri di Garmin Connect (direkomendasikan; key disimpan terenkripsi AES-256-GCM, tanpa password, bisa dicabut kapan pun dari Garmin), atau (b) jalur lama email & password (password terenkripsi AES-256-GCM; sedang dimigrasikan keluar).</li>
           <li className={li}><b>Data aktivitas & wellness</b> — jarak, pace, heart rate, cadence, rute GPS, split per km, tidur, HRV, skor kesiapan, VO2max — semuanya dari akun Garmin-mu.</li>
           <li className={li}><b>Riwayat chat AI</b> — percakapan dengan AI Coach (dihapus otomatis setelah 30 hari).</li>
           <li className={li}><b>Data teknis dasar</b> — log server standar (alamat IP, waktu akses) untuk keamanan dan debugging.</li>

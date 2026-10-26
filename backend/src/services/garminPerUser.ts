@@ -36,7 +36,10 @@ const queue: number[] = [];
 let processing = false;
 
 export async function garminConnected(userId: number): Promise<boolean> {
-  const r = await query('SELECT garmin_email IS NOT NULL AS connected FROM users WHERE id = $1', [userId]);
+  await ensurePaColumns();
+  const r = await query(
+    'SELECT (garmin_email IS NOT NULL OR garmin_api_key_enc IS NOT NULL) AS connected FROM users WHERE id = $1', [userId]
+  );
   return !!r.rows[0]?.connected;
 }
 
@@ -51,6 +54,75 @@ export async function saveGarminCredentials(userId: number, email: string, passw
      WHERE id = $3`,
     [email.trim().toLowerCase(), encrypt(password), userId, verified]
   );
+}
+
+// ── Garmin Personal API (resmi) — BYOK per user (Fase 2 migrasi) ──
+
+let paColumnsReady: Promise<void> | null = null;
+/** Kolom Personal API dibuat malas (idempoten) — DB lama tanpa kolom tetap jalan. */
+export function ensurePaColumns(): Promise<void> {
+  paColumnsReady ||= query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS garmin_api_key_enc TEXT`)
+    .then(() => query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS garmin_api_key_expires_at DATE`))
+    .then(() => undefined)
+    .catch((e) => { paColumnsReady = null; throw e; });
+  return paColumnsReady;
+}
+
+/** Validasi input key Personal API. Return pesan error atau null bila valid. */
+export function validateApiKeyInput(key: unknown): string | null {
+  if (typeof key !== 'string' || key.trim().length === 0) return 'API key wajib diisi';
+  const k = key.trim();
+  if (k.length < 16 || k.length > 300) return 'API key tidak valid (16–300 karakter)';
+  return null;
+}
+
+/** Key kedaluwarsa? (tanpa tanggal → dianggap tidak kedaluwarsa; penanganan gagal sync tetap jalan) */
+export function keyExpired(expiresAt: string | null | undefined, now: Date = new Date()): boolean {
+  if (!expiresAt) return false;
+  const d = new Date(expiresAt);
+  return !isNaN(d.getTime()) && d.getTime() < now.getTime();
+}
+
+export type ConnectionType = 'personal' | 'legacy' | null;
+export function connectionType(hasApiKey: boolean, hasLegacyCreds: boolean): ConnectionType {
+  if (hasApiKey) return 'personal';
+  if (hasLegacyCreds) return 'legacy';
+  return null;
+}
+
+/** Simpan API key Personal API user (terenkripsi) — koneksi langsung valid (key diverifikasi saat connect). */
+export async function saveGarminApiKey(userId: number, apiKey: string, expiresAt: string | null): Promise<void> {
+  await ensurePaColumns();
+  const { encrypt } = await import('./crypto.js');
+  await query(
+    `UPDATE users SET garmin_api_key_enc = $1, garmin_api_key_expires_at = $2, garmin_connected_at = now() WHERE id = $3`,
+    [encrypt(apiKey.trim()), expiresAt, userId]
+  );
+}
+
+/** Ambil & dekripsi API key Personal API user. */
+export async function loadGarminApiKey(userId: number): Promise<{ apiKey: string; expiresAt: string | null } | null> {
+  if (!Number.isInteger(userId) || userId <= 0) return null;
+  await ensurePaColumns();
+  const r = await query(
+    'SELECT garmin_api_key_enc, garmin_api_key_expires_at::text AS expires_at FROM users WHERE id = $1', [userId]
+  );
+  const row = r.rows[0];
+  if (!row?.garmin_api_key_enc) return null;
+  return { apiKey: decrypt(row.garmin_api_key_enc), expiresAt: row.expires_at ?? null };
+}
+
+/** Preferensi jalur koneksi user (migrasi: personal menang atas legacy). */
+export async function connectionTypeFor(userId: number): Promise<ConnectionType> {
+  if (!Number.isInteger(userId) || userId <= 0) return null;
+  await ensurePaColumns();
+  const r = await query(
+    'SELECT garmin_api_key_enc IS NOT NULL AS has_key, garmin_email IS NOT NULL AS has_legacy FROM users WHERE id = $1',
+    [userId]
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  return connectionType(!!row.has_key, !!row.has_legacy);
 }
 
 /** Ambil & dekripsi kredensial user. */
@@ -132,6 +204,21 @@ function processQueue(defaultDays?: number, defaultDetails = false, defaultHealt
   if (!userId) return;
   processing = true;
   (async () => {
+    // Migrasi: Personal API menang atas kredensial legacy
+    const apiKey = await loadGarminApiKey(userId);
+    if (apiKey) {
+      if (keyExpired(apiKey.expiresAt)) {
+        lastByUser.set(userId, { userId, startedAt: new Date().toISOString(), status: 'failed',
+          detail: 'API key Garmin kedaluwarsa — buat key baru di Garmin Connect lalu perbarui di Pengaturan.' });
+        return;
+      }
+      const args: string[] = ['--user-id', String(userId), '--personal'];
+      if (defaultDays) args.push('--days', String(defaultDays));
+      if (defaultDetails) args.push('--details', '--max-detail', '30');
+      if (defaultHealth) args.push('--health');
+      await runPython(userId, args, { GARMIN_PERSONAL_KEY: apiKey.apiKey });
+      return;
+    }
     const creds = await loadCredentials(userId);
     if (!creds) {
       lastByUser.set(userId, { userId, startedAt: new Date().toISOString(), status: 'failed', detail: 'Kredensial Garmin belum dihubungkan' });
@@ -164,7 +251,8 @@ export function syncStatusFor(userId: number): SyncJob | null {
 
 /** Cron: antrekan sync untuk SEMUA user yang terhubung (jalankan via /activities/cron-sync-all + SYNC_SECRET). */
 export async function queueAllConnected(days?: number, details = false, health = false): Promise<number> {
-  const r = await query('SELECT id FROM users WHERE garmin_email IS NOT NULL');
+  await ensurePaColumns();
+  const r = await query('SELECT id FROM users WHERE garmin_email IS NOT NULL OR garmin_api_key_enc IS NOT NULL');
   for (const row of r.rows) queueSync(row.id, days, details, health);
   return r.rows.length;
 }
@@ -256,13 +344,66 @@ export async function connectHandler(req: Request, res: Response) {
   res.json({ success: true, message: 'Kredensial Garmin valid & tersimpan terenkripsi. Silakan sync.' });
 }
 
+/** Verifikasi API key Personal API dengan mint token beneran (1 HTTP call — serverless ok). */
+async function verifyGarminApiKey(apiKey: string): Promise<boolean> {
+  try {
+    const r = await fetch(
+      'https://personal.connectapi.garmin.com/personalapitoken-service/personal-api/personal-api-key/token',
+      { method: 'POST', headers: { Authorization: 'ApiKey ' + apiKey }, signal: AbortSignal.timeout(30_000) }
+    );
+    if (!r.ok) return false;
+    const txt = await r.text();
+    return txt.trim().split('.').length >= 3; // JWT plain-text (kontrak empiris)
+  } catch {
+    return false;
+  }
+}
+
+/** Handler: hubungkan Garmin via Personal API key (JWT auth). ToS gate sama. */
+export async function connectApiKeyHandler(req: Request, res: Response) {
+  const userId = (req as any).user?.id;
+  const { apiKey, expiresAt, acceptTerms } = req.body || {};
+  if (acceptTerms !== true) {
+    return res.status(403).json({ error: 'Kamu harus menyetujui Terms of Service & Privacy Policy dulu.' });
+  }
+  const vErr = validateApiKeyInput(apiKey);
+  if (vErr) return res.status(400).json({ error: vErr });
+  let expDate: string | null = null;
+  if (expiresAt != null && expiresAt !== '') {
+    const d = new Date(String(expiresAt));
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'Tanggal kedaluwarsa tidak valid' });
+    expDate = d.toISOString().slice(0, 10);
+  }
+  // Verifikasi langsung: key ditolak Garmin → jangan simpan
+  if (!(await verifyGarminApiKey(String(apiKey).trim()))) {
+    return res.status(400).json({ error: 'API key Garmin ditolak. Pastikan key belum kedaluwarsa dan dibuat di Garmin Connect Web.' });
+  }
+  await saveGarminApiKey(userId, String(apiKey), expDate);
+  await query(`UPDATE users SET terms_accepted_at = now(), terms_version = $1 WHERE id = $2`, [TERMS_VERSION, userId]);
+  res.json({ success: true, message: 'Garmin terhubung via Personal API resmi. Sync harian aktif — password tidak pernah disentuh.' });
+}
+
 /** Handler: status sync user (JWT auth). */
 export async function statusHandler(req: Request, res: Response) {
   const userId = (req as any).user?.id;
   // Serverless: memori antar-invoke hilang → status diambil dari run GitHub Actions (stateless),
   // sehingga polling Dashboard tetap menerima running/done/failed.
   const status = ghEnabled() ? await latestRunStatus() : syncStatusFor(userId);
-  res.json({ status, connected: await garminConnected(userId) });
+  await ensurePaColumns();
+  const r = await query(
+    'SELECT garmin_api_key_enc IS NOT NULL AS has_key, garmin_email IS NOT NULL AS has_legacy, '
+    + 'garmin_api_key_expires_at::text AS expires_at FROM users WHERE id = $1', [userId]
+  );
+  const row = r.rows[0] || {};
+  const conn = connectionType(!!row.has_key, !!row.has_legacy);
+  // Kontrak Fase 2: respons TIDAK PERNAH memuat key/token — hanya metadata
+  res.json({
+    status,
+    connected: conn !== null,
+    connection: conn,
+    api_key_expires_at: row.expires_at ?? null,
+    key_expired: keyExpired(row.expires_at ?? null),
+  });
 }
 
 // Legacy export dibiarkan agar import lama tidak rusak

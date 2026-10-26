@@ -72,6 +72,15 @@ jobs:
           resp=$(curl -sf -X POST "$API/api/activities/garmin/internal-creds" \
             -H 'Content-Type: application/json' -H "X-Sync-Secret: $SECRET" \
             -d "{\"user_id\": $USER_ID}")
+          # Migrasi Fase 2: user dengan Personal API key → api_key (mask; tanpa email/pw)
+          api_key=$(jq -r '.api_key // empty' <<<"$resp")
+          if [ -n "$api_key" ]; then
+            echo "::add-mask::$api_key"
+            echo "GARMIN_PERSONAL_KEY=$api_key" >> "$GITHUB_ENV"
+            echo "USE_PERSONAL=1" >> "$GITHUB_ENV"
+            echo "Backend: Personal API (user $USER_ID)"
+            exit 0
+          fi
           email=$(jq -r '.email // empty' <<<"$resp")
           pw=$(jq -r '.password // empty' <<<"$resp")
           if [ -z "$email" ] || [ -z "$pw" ]; then echo "Kredensial tidak ditemukan: $resp"; exit 1; fi
@@ -119,8 +128,8 @@ jobs:
           extra=""
           [ -n "${{ inputs.days }}" ] && extra="--days ${{ inputs.days }}"
           [ "${{ inputs.details }}" = "true" ] && extra="$extra --details --max-detail 30"
-          # jalur personal (K2: owner dulu) — flag eksplisit; --health dilewati script (belum didukung)
-          if [ "${{ inputs.backend }}" = "personal" ]; then
+          # prioritas jalur personal: input backend=personal ATAU user punya API key (dari internal-creds)
+          if [ "${{ inputs.backend }}" = "personal" ] || [ "${{ env.USE_PERSONAL }}" = "1" ]; then
             extra="$extra --personal"
           elif [ "${{ inputs.health }}" = "true" ]; then
             extra="$extra --health"
@@ -144,6 +153,16 @@ jobs:
             resp=$(curl -sf -X POST "$API/api/activities/garmin/internal-creds" \
               -H 'Content-Type: application/json' -H "X-Sync-Secret: $SECRET" \
               -d "{\"user_id\":$uid}") || { echo "user $uid: gagal ambil kredensial"; failed=1; continue; }
+            api_key=$(jq -r '.api_key // empty' <<<"$resp")
+            if [ -n "$api_key" ]; then
+              # Migrasi Fase 2: user pakai Personal API key (resmi)
+              echo "::add-mask::$api_key"
+              echo "   user $uid: jalur Personal API"
+              GARMIN_PERSONAL_KEY=$api_key \
+                python scripts/garmin_sync.py --user-id "$uid" --days 7 --details --max-detail 30 \
+                || failed=1
+              continue
+            fi
             email=$(jq -r '.email // empty' <<<"$resp"); pw=$(jq -r '.password // empty' <<<"$resp")
             echo "::add-mask::$email"; echo "::add-mask::$pw"
             GARMIN_EMAIL=$email GARMIN_PASSWORD=$pw \
