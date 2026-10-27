@@ -161,31 +161,63 @@ def pa_download_fit(token, activity_id, fit_dir):
         fh.write(z.read(names[0]))
     return out
 
-def pa_fit_to_latlng(fit_path):
-    """File .fit -> list [lat, lng] (derajat) dari record GPS. Tanpa GPS → [].
-    position_lat/long di FIT mentah = SEMICIRCLES (bukan derajat!) —
-    konversi: derajat = semicircles × 180 / 2^31 (terverifikasi: -92957780 → -7.80°)."""
+def pa_fit_to_streams(fit_path):
+    """File .fit -> streams legacy-format (paralel, null dipertahankan agar indeks sejajar):
+    latlng, distance (m kumulatif), time (epoch ms), heartrate, altitude, velocity_smooth (m/s), cadence (spm dua kaki).
+    Plus splits dari lap frames: [{split, distance, duration, average_speed, average_heartrate}].
+    position_* di FIT mentah = SEMICIRCLES → derajat = ×180/2^31 (terverifikasi -92957780 → -7.80°).
+    cadence FIT = per-kaki → ×2 = spm dua kaki (dicek vs DB: mean×2 ≈ 157)."""
     import fitdecode
     SEMI = 180.0 / (2 ** 31)
-    latlng = []
+    streams = {"latlng": [], "distance": [], "time": [], "heartrate": [],
+               "altitude": [], "velocity_smooth": [], "cadence": []}
+    splits = []
+    lap_no = 0
     with fitdecode.FitReader(fit_path) as reader:
         for frame in reader:
             if not isinstance(frame, fitdecode.FitDataMessage):
                 continue
-            if frame.name != 'record':
-                continue
-            lat = lon = None
-            for f in frame.fields:
-                if f.name == 'position_lat':
-                    lat = f.value
-                elif f.name == 'position_long':
-                    lon = f.value
-            if lat is not None and lon is not None:
-                latlng.append([round(float(lat) * SEMI, 6), round(float(lon) * SEMI, 6)])
-    return latlng
+            if frame.name == 'record':
+                f = {fld.name: fld.value for fld in frame.fields}
+                lat, lon = f.get('position_lat'), f.get('position_long')
+                streams["latlng"].append(
+                    [round(float(lat) * SEMI, 6), round(float(lon) * SEMI, 6)]
+                    if lat is not None and lon is not None else None)
+                streams["distance"].append(float(f['distance']) if f.get('distance') is not None else None)
+                ts = f.get('timestamp')
+                streams["time"].append(int(ts.timestamp() * 1000) if ts is not None else None)
+                streams["heartrate"].append(float(f['heart_rate']) if f.get('heart_rate') is not None else None)
+                alt = f.get('enhanced_altitude', f.get('altitude'))
+                streams["altitude"].append(float(alt) if alt is not None else None)
+                spd = f.get('enhanced_speed', f.get('speed'))
+                streams["velocity_smooth"].append(float(spd) if spd is not None else None)
+                # cadence FIT = per-kaki (+fractional) → ×2 = SPM dua kaki (konvensi streams legacy)
+                cad = f.get('cadence')
+                frac = f.get('fractional_cadence') or 0
+                streams["cadence"].append(float(cad + frac) * 2 if cad is not None else None)
+            elif frame.name == 'lap':
+                lap_no += 1
+                f = {fld.name: fld.value for fld in frame.fields}
+                if f.get('total_distance') is None:
+                    continue
+                splits.append({
+                    "split": lap_no,
+                    "distance": float(f['total_distance']),
+                    "duration": float(f.get('total_elapsed_time') or 0),
+                    "average_speed": float(f['avg_speed']) if f.get('avg_speed') is not None else None,
+                    "average_heartrate": float(f['avg_heart_rate']) if f.get('avg_heart_rate') is not None else None,
+                })
+    streams = {k: {"data": v} for k, v in streams.items()}
+    streams = {k: v for k, v in streams.items() if any(x is not None for x in v["data"])}
+    return streams, (splits or None)
+
+def pa_fit_to_latlng(fit_path):
+    """Wrapper kompatibilitas: streams -> list [lat, lng] (derajat)."""
+    streams, _ = pa_fit_to_streams(fit_path)
+    return streams.get("latlng", {}).get("data") or []
 
 def pa_sync_polylines(token, runs, fit_dir, conn, max_fetch=30):
-    """Pastikan FIT ada (unduh bila perlu) → parse GPS → polyline → UPDATE map_polyline.
+    """Pastikan FIT ada (unduh bila perlu) → parse streams+splits+GPS → UPDATE activities.
     Idempoten: FIT yang sudah ada di disk tidak diunduh ulang; polyline lama tak ditimpa
     kalau hasil parse kosong (treadmill/tanpa GPS)."""
     import urllib.request
@@ -210,20 +242,24 @@ def pa_sync_polylines(token, runs, fit_dir, conn, max_fetch=30):
                     fh.write(z.read(names[0]))
                 done += 1
                 time.sleep(1.5)  # limit tak terdokumentasi — jaga sopan santun
-            latlng = pa_fit_to_latlng(out)
+            streams, splits = pa_fit_to_streams(out)
+            latlng = streams.get("latlng", {}).get("data") or []
             polyline = encode_polyline(latlng) if latlng else None
             if polyline:
                 # polyline FIT (Ground Truth, ratusan-ribuan titik) menang atas polyline
                 # legacy yang simplified — bandingkan panjang encoded sebagai proxy detail
                 cur.execute(
                     """UPDATE activities
-                       SET map_polyline = CASE WHEN length(COALESCE(map_polyline, '')) < length(%s)
-                                               THEN %s ELSE map_polyline END
+                       SET streams = COALESCE(%s, streams),
+                           splits = COALESCE(%s, splits),
+                           map_polyline = CASE WHEN length(COALESCE(map_polyline, '')) < length(%s)
+                                               THEN %s ELSE map_polyline END,
+                           details_fetched = TRUE
                        WHERE garmin_activity_id = %s""",
-                    (polyline, polyline, gid),
+                    (json.dumps(streams), json.dumps(splits), polyline, polyline, gid),
                 )
                 parsed += 1
-                print(f"   ✓ {gid}: {len(latlng)} titik GPS")
+                print(f"   ✓ {gid}: {len(latlng)} titik GPS, streams={'y' if streams else 'n'}, splits={len(splits or [])}")
             else:
                 print(f"   - {gid}: tanpa GPS (treadmill/di dalam ruangan), dilewati")
         except Exception as e:

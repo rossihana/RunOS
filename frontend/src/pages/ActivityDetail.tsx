@@ -8,11 +8,11 @@ import { useTheme } from '../components/layout/ThemeProvider';
 import ReactMarkdown from 'react-markdown';
 
 // Mapping
-import { MapContainer, TileLayer, Polyline as LeafletPolyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline as LeafletPolyline, CircleMarker, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 // Charting
-import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from 'recharts';
 
 interface PREffort {
   name: string;
@@ -60,9 +60,20 @@ interface ActivityDetailData {
   cadence: number | null;
 }
 
+/** Child di dalam MapContainer: mousemove/tap → index titik streams terdekat. */
+function MapHoverPicker({ onPick }: { onPick: (latlng: { lat: number; lng: number } | null) => void }) {
+  useMapEvents({
+    mousemove: (e) => onPick(e.latlng),
+    mouseout: () => onPick(null),
+    click: (e) => onPick(e.latlng), // mobile: tap = hover
+  });
+  return null;
+}
+
 export default function ActivityDetail() {
   const { id } = useParams<{ id: string }>();
   const [activity, setActivity] = useState<ActivityDetailData | null>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -165,7 +176,24 @@ export default function ActivityDetail() {
     );
   }
 
-  // --- MAP PREP ---
+  // --- MAP HOVER: cari titik streams terdekat dari kursor (aktif hanya jika streams ada) ---
+  const streamLatlngAll = activity?.streams?.latlng?.data as ([number, number] | null)[] | undefined;
+  const handleMapPick = (latlng: { lat: number; lng: number } | null) => {
+    const all = streamLatlngAll;
+    if (!latlng || !all || all.length === 0) { setHoverIdx(null); return; }
+    // nearest neighbor (haversine kasar dalam meter) — 4k titik masih murah
+    const R = 111_320; // meter per derajat (aproksimasi)
+    let best = -1, bestD = 100_000; // threshold 100 m — di luar itu bukan "di dekat rute"
+    for (let i = 0; i < all.length; i++) {
+      const p = all[i];
+      if (!p) continue;
+      const dy = (p[0] - latlng.lat) * R;
+      const dx = (p[1] - latlng.lng) * R * Math.cos((latlng.lat * Math.PI) / 180);
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    setHoverIdx(best >= 0 ? best : null);
+  };
   let mapPositions: [number, number][] = [];
   if (activity.map_polyline) {
       mapPositions = decodePolyline(activity.map_polyline);
@@ -268,12 +296,44 @@ export default function ActivityDetail() {
                      maxZoom={16}
                  />
                  <LeafletPolyline positions={mapPositions} pathOptions={{ color: '#f97316', weight: 4 }} />
-             </MapContainer>
-        ) : (
+                 {hoverIdx !== null && streamLatlngAll?.[hoverIdx] && (
+                   <CircleMarker
+                     center={streamLatlngAll[hoverIdx] as [number, number]}
+                     radius={7}
+                     pathOptions={{ color: '#ffffff', weight: 2.5, fillColor: '#f97316', fillOpacity: 1 }}
+                   />
+                 )}
+                 <MapHoverPicker onPick={handleMapPick} />
+              </MapContainer>
+         ) : (
            <div className="w-full h-full flex flex-col items-center justify-center text-zinc-400">
              <MapPin className="w-12 h-12 mb-2 opacity-50" />
              <p>No GPS Data Available</p>
            </div>
+        )}
+
+        {/* Tooltip hover: km / pace / HR di titik rute yang diarahkan kursor */}
+        {hoverIdx !== null && chartData[hoverIdx] && (
+          <div className="absolute top-3 right-3 z-[500] pointer-events-none rounded-xl bg-white/95 dark:bg-black/90 border border-zinc-200 dark:border-zinc-700 shadow-xl px-4 py-2.5">
+            <div className="flex items-center gap-4 text-[11px]">
+              <div>
+                <p className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold">Km</p>
+                <p className="font-bold text-sm text-zinc-900 dark:text-white">{chartData[hoverIdx].distance}</p>
+              </div>
+              <div className="w-px h-7 bg-zinc-200 dark:bg-zinc-700" />
+              <div>
+                <p className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold">Pace</p>
+                <p className="font-bold text-sm text-blue-600 dark:text-blue-400">{chartData[hoverIdx].paceFormatted}</p>
+              </div>
+              <div className="w-px h-7 bg-zinc-200 dark:bg-zinc-700" />
+              <div>
+                <p className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold">HR</p>
+                <p className={`font-bold text-sm ${chartData[hoverIdx].hr ? 'text-rose-600 dark:text-rose-400' : 'text-zinc-400'}`}>
+                  {chartData[hoverIdx].hr ? `${Math.round(chartData[hoverIdx].hr!)} bpm` : '--'}
+                </p>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
@@ -455,6 +515,9 @@ export default function ActivityDetail() {
                                        formatter={(val: any) => [`${Math.round(val ?? 0)} bpm`, 'Heart Rate'] as any}
                                    />
                                    <Line type="monotone" dataKey="hr" stroke="#f43f5e" strokeWidth={2} dot={false} isAnimationActive={false} />
+                                   {hoverIdx !== null && chartData[hoverIdx]?.hr != null && (
+                                     <ReferenceDot {...({ x: chartData[hoverIdx].distance, y: chartData[hoverIdx].hr!, r: 5, fill: '#f97316', stroke: '#fff', isFront: true } as any)} />
+                                   )}
                                </LineChart>
                            </ResponsiveContainer>
                        </div>
@@ -483,6 +546,9 @@ export default function ActivityDetail() {
                                        formatter={paceTooltipFormatter as any}
                                    />
                                    <Line type="monotone" dataKey="pace" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false} />
+                                   {hoverIdx !== null && chartData[hoverIdx]?.pace != null && (
+                                     <ReferenceDot {...({ x: chartData[hoverIdx].distance, y: chartData[hoverIdx].pace!, r: 5, fill: '#f97316', stroke: '#fff', isFront: true } as any)} />
+                                   )}
                                </LineChart>
                            </ResponsiveContainer>
                        </div>
@@ -507,6 +573,9 @@ export default function ActivityDetail() {
                                        formatter={(val: any) => [`${Math.round(val ?? 0)} spm`, 'Cadence'] as any}
                                    />
                                    <Line type="monotone" dataKey="cadence" stroke="#a855f7" strokeWidth={2} dot={false} isAnimationActive={false} />
+                                   {hoverIdx !== null && chartData[hoverIdx]?.cadence != null && (
+                                     <ReferenceDot {...({ x: chartData[hoverIdx].distance, y: chartData[hoverIdx].cadence!, r: 5, fill: '#f97316', stroke: '#fff', isFront: true } as any)} />
+                                   )}
                                </LineChart>
                            </ResponsiveContainer>
                        </div>
@@ -537,6 +606,9 @@ export default function ActivityDetail() {
                                        formatter={(val: any) => [`${Math.round(val ?? 0)} m`, 'Elevation'] as any}
                                    />
                                    <Area type="monotone" dataKey="altitude" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorAlt)" isAnimationActive={false} />
+                                   {hoverIdx !== null && chartData[hoverIdx]?.altitude != null && (
+                                     <ReferenceDot {...({ x: chartData[hoverIdx].distance, y: chartData[hoverIdx].altitude!, r: 5, fill: '#f97316', stroke: '#fff', isFront: true } as any)} />
+                                   )}
                                </AreaChart>
                            </ResponsiveContainer>
                        </div>
