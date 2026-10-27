@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { ArrowLeft, Clock, MapPin, Activity as ActivityIcon, HeartPulse, Mountain, TrendingUp, Award, Sparkles, Wand2, Footprints } from 'lucide-react';
@@ -74,6 +74,7 @@ export default function ActivityDetail() {
   const { id } = useParams<{ id: string }>();
   const [activity, setActivity] = useState<ActivityDetailData | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const lastMoveRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -150,6 +151,39 @@ export default function ActivityDetail() {
     return 'Anaerobic / Max';
   };
 
+  // --- CHART PREP (memoized — jangan rebuild 3.6k objek tiap hover) ---
+  const chartData = useMemo(() => {
+    const out: { distance: string; hr: number | null; altitude: number | null; pace: number | null; paceFormatted: string; cadence: number | null }[] = [];
+    if (activity?.streams) {
+      const distStream = activity.streams.distance?.data;
+      const hrStream = activity.streams.heartrate?.data;
+      const altStream = activity.streams.altitude?.data;
+      const paceStream = activity.streams.velocity_smooth?.data;
+      const cadenceStream = activity.streams.cadence?.data;
+
+      if (distStream) {
+        for (let i = 0; i < distStream.length; i++) {
+          // Transform pace to seconds per km for charting (to reverse Y axis later or format it)
+          // Handle infinity or zero pace
+          let paceSecs = 0;
+          if (paceStream && paceStream[i] > 0.5) { // filter out completely stopped or crazy data
+            paceSecs = 1000 / paceStream[i];
+          }
+
+          out.push({
+            distance: (distStream[i] / 1000).toFixed(2), // km
+            hr: hrStream ? hrStream[i] : null,
+            altitude: altStream ? altStream[i] : null,
+            pace: paceSecs > 0 ? paceSecs : null, // Store in seconds
+            paceFormatted: paceStream && paceStream[i] > 0 ? formatPace(paceStream[i]) : '--',
+            cadence: cadenceStream ? (cadenceStream[i] ?? null) : null
+          });
+        }
+      }
+    }
+    return out;
+  }, [activity]);
+
   if (loading) {
     return (
       <div className="space-y-6 max-w-4xl mx-auto -mt-4 animate-pulse">
@@ -181,6 +215,10 @@ export default function ActivityDetail() {
   const handleMapPick = (latlng: { lat: number; lng: number } | null) => {
     const all = streamLatlngAll;
     if (!latlng || !all || all.length === 0) { setHoverIdx(null); return; }
+    // throttle: mousemove bisa 60+/detik — cukup 25/s (lag killer #2)
+    const now = Date.now();
+    if (now - lastMoveRef.current < 40) return;
+    lastMoveRef.current = now;
     // nearest neighbor (haversine kasar dalam meter) — 4k titik masih murah
     const R = 111_320; // meter per derajat (aproksimasi)
     let best = -1, bestD = 100_000; // threshold 100 m — di luar itu bukan "di dekat rute"
@@ -192,7 +230,9 @@ export default function ActivityDetail() {
       const d = Math.sqrt(dx * dx + dy * dy);
       if (d < bestD) { bestD = d; best = i; }
     }
-    setHoverIdx(best >= 0 ? best : null);
+    const next = best >= 0 ? best : null;
+    // bail-out: React skip re-render kalau index sama (lag killer #1)
+    setHoverIdx(prev => (prev === next ? prev : next));
   };
   let mapPositions: [number, number][] = [];
   if (activity.map_polyline) {
@@ -215,36 +255,6 @@ export default function ActivityDetail() {
           [Math.min(...lats), Math.min(...lngs)],
           [Math.max(...lats), Math.max(...lngs)]
       ];
-  }
-
-  // --- CHART PREP ---
-  const chartData = [];
-  if (activity.streams) {
-      const distStream = activity.streams.distance?.data;
-      const hrStream = activity.streams.heartrate?.data;
-      const altStream = activity.streams.altitude?.data;
-      const paceStream = activity.streams.velocity_smooth?.data;
-      const cadenceStream = activity.streams.cadence?.data;
-
-      if (distStream) {
-          for (let i = 0; i < distStream.length; i++) {
-              // Transform pace to seconds per km for charting (to reverse Y axis later or format it)
-              // Handle infinity or zero pace
-              let paceSecs = 0;
-              if (paceStream && paceStream[i] > 0.5) { // filter out completely stopped or crazy data
-                  paceSecs = 1000 / paceStream[i]; 
-              }
-
-              chartData.push({
-                  distance: (distStream[i] / 1000).toFixed(2), // km
-                  hr: hrStream ? hrStream[i] : null,
-                  altitude: altStream ? altStream[i] : null,
-                  pace: paceSecs > 0 ? paceSecs : null, // Store in seconds
-                  paceFormatted: paceStream && paceStream[i] > 0 ? formatPace(paceStream[i]) : '--',
-                  cadence: cadenceStream ? (cadenceStream[i] ?? null) : null
-              });
-          }
-      }
   }
 
   // Pace Chart Tooltip Formatter
