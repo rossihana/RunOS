@@ -20,10 +20,6 @@ const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Activities = lazy(() => import('./pages/Activities'));
 const ActivityDetail = lazy(() => import('./pages/ActivityDetail'));
-const MapPrototype = lazy(() => import('./pages/MapPrototype'));
-const MapTest = lazy(() => import('./pages/MapTest'));
-const MapCompare = lazy(() => import('./pages/MapCompare'));
-const MapTestCompare = lazy(() => import('./pages/MapTestCompare'));
 const Races = lazy(() => import('./pages/Races'));
 const AICoach = lazy(() => import('./pages/AICoach.tsx'));
 const AiSettings = lazy(() => import('./pages/AiSettings.tsx'));
@@ -46,7 +42,6 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/terms" element={<Terms />} />
-            <Route path="/map-test-compare" element={<MapTestCompare />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/reset-password" element={<ResetPassword />} />
@@ -55,7 +50,6 @@ export default function App() {
                 <Route index element={<Dashboard />} />
                 <Route path="activities" element={<Activities />} />
                 <Route path="activities/:id" element={<ActivityDetail />} />
-                <Route path="map-proto/:id" element={<MapPrototype />} />
                 <Route path="races" element={<Races />} />
                 <Route path="training" element={<TrainingPlan />} />
                 <Route path="ai-coach" element={<AICoach />} />
@@ -64,8 +58,6 @@ export default function App() {
                 <Route path="lab" element={<PerformanceLab />} />
               </Route>
             </Route>
-            <Route path="map-test" element={<MapTest />} />
-            <Route path="map-compare/:id" element={<MapCompare />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

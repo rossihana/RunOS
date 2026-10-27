@@ -25,16 +25,16 @@ export default function Terms() {
 
         <h2 className={h2}>3. Akun & Kredensial Garmin</h2>
         <ul className="space-y-1 mb-2">
-          <li className={li}>Saat menghubungkan Garmin, kamu memberikan email dan password Garmin Connect-mu kepada RunOS untuk tujuan sinkronisasi data — <b>tidak untuk tujuan lain</b>.</li>
-          <li className={li}>Password Garmin disimpan dalam bentuk terenkripsi (AES-256-GCM) dan tidak pernah ditampilkan kembali kepada siapa pun, termasuk kamu.</li>
-          <li className={li}>Kamu dapat memutuskan koneksi Garmin kapan pun; kredensial akan dihapus.</li>
+          <li className={li}><b>Jalur resmi (direkomendasikan):</b> kamu membuat <b>Garmin Connect Personal API Key</b> sendiri di akun Garmin-mu dan menempelkannya di RunOS. Key hanya digunakan untuk membaca data aktivitas & wellness-mu (read-only), disimpan terenkripsi (AES-256-GCM), dan <b>tidak pernah ditampilkan kembali</b>. Key punya masa berlaku sesuai pilihanmu di Garmin — RunOS akan mengingatkan saat mendekati kedaluwarsa.</li>
+          <li className={li}><b>Jalur lama (sedang dimigrasikan keluar):</b> email & password Garmin Connect, hanya untuk sinkronisasi data — tidak untuk tujuan lain. Password disimpan terenkripsi (AES-256-GCM) dan tidak pernah ditampilkan kembali.</li>
+          <li className={li}>Kamu dapat memutuskan koneksi Garmin kapan pun; key/kredensial terkait akan dihapus. Mencabut API key dari sisi Garmin juga langsung menghentikan akses.</li>
         </ul>
 
         <h2 className={h2}>4. Sifat Integrasi Garmin (PENTING)</h2>
-        <p className={p}>Sinkronisasi menggunakan <b>API tidak resmi</b> Garmin Connect (bukan partner API resmi). Konsekuensinya:</p>
+        <p className={p}>RunOS memakai dua jalur integrasi selama masa transisi:</p>
         <ul className="space-y-1 mb-2">
-          <li className={li}>Integrasi dapat berhenti bekerja sewaktu-waktu tanpa kontrol kami jika Garmin mengubah sistemnya.</li>
-          <li className={li}>Garmin dapat membatasi (rate-limit) aktivitas login/sync yang terlalu sering.</li>
+          <li className={li}><b>Personal API resmi</b> — didukung Garmin melalui program resmi; inilah arah utama RunOS. Tetap tunduk pada ketentuan pemakaian API Garmin dan kemungkinan perubahan dari pihak Garmin.</li>
+          <li className={li}><b>API tidak resmi (jalur lama)</b> — hanya untuk akun yang belum bermigrasi. Integrasi ini dapat berhenti bekerja sewaktu-waktu tanpa kontrol kami jika Garmin mengubah sistemnya, dan Garmin dapat membatasi (rate-limit) login/sync yang terlalu sering.</li>
           <li className={li}>Dengan menghubungkan akun, kamu memahami dan menerima risiko ini.</li>
         </ul>
 
