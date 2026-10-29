@@ -661,6 +661,70 @@ ON CONFLICT (user_id, date) DO UPDATE SET
   raw = EXCLUDED.raw;
 """
 
+HEALTH_TOPUP_SQL = """
+INSERT INTO health_daily (user_id, date, vo2max_garmin, pred_5k_s, pred_10k_s, pred_hm_s, pred_fm_s, raw)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (user_id, date) DO UPDATE SET
+  vo2max_garmin = COALESCE(EXCLUDED.vo2max_garmin, health_daily.vo2max_garmin),
+  pred_5k_s = COALESCE(EXCLUDED.pred_5k_s, health_daily.pred_5k_s),
+  pred_10k_s = COALESCE(EXCLUDED.pred_10k_s, health_daily.pred_10k_s),
+  pred_hm_s = COALESCE(EXCLUDED.pred_hm_s, health_daily.pred_hm_s),
+  pred_fm_s = COALESCE(EXCLUDED.pred_fm_s, health_daily.pred_fm_s),
+  raw = COALESCE(health_daily.raw, '{}'::jsonb) || EXCLUDED.raw;
+"""
+
+def pa_health_legacy_topup(conn, user_id, days):
+    """Top-up VO2max harian + race predictor via jalur legacy — Personal API tidak
+    menyediakan keduanya (maxmet/fitnessage 404, vO2MaxValue None — terverifikasi).
+    Hanya jalan bila GARMIN_EMAIL+PASSWORD tersedia di env (mis. akun owner yang
+    lama); user baru PA-only tidak kena dan VO2max-nya memang tidak tersedia.
+    Semua field COALESCE + raw di-merge → tidak menimpa data PA yang fresh."""
+    import datetime
+    email = ENV.get("GARMIN_EMAIL") or os.environ.get("GARMIN_EMAIL")
+    password = ENV.get("GARMIN_PASSWORD") or os.environ.get("GARMIN_PASSWORD")
+    if not (email and password):
+        print("   - VO2max/race predictor: kredensial legacy tidak ada — dilewati (batasan Personal API)")
+        return
+    from garminconnect import Garmin
+    c = Garmin(email=email, password=password)
+    login_garmin(c)
+    today = datetime.date.today()
+    cur = conn.cursor()
+    n = 0
+    for i in range(days):
+        d = (today - datetime.timedelta(days=i)).isoformat()
+        try:
+            mm = c.get_max_metrics(d) or []
+            g = (mm[0].get("generic") if mm and isinstance(mm[0], dict) else None) or {}
+            vo2 = g.get("vo2MaxValue")
+            if vo2 is None:
+                continue
+            cur.execute(HEALTH_TOPUP_SQL, (user_id, d, vo2, None, None, None, None, json.dumps({"vo2max": vo2})))
+            conn.commit()
+            n += 1
+            time.sleep(0.5)
+        except Exception as e:
+            conn.rollback()
+            print(f"   ✗ vo2max {d}: {type(e).__name__}: {str(e)[:80]}")
+    print(f"🫁 VO2max harian (legacy top-up): {n}/{days} hari")
+    try:
+        start_d = (today - datetime.timedelta(days=days - 1)).isoformat()
+        m = 0
+        for pr in (c.get_race_predictions(start_d, today.isoformat(), _type='daily') or []):
+            d = pr.get('calendarDate')
+            if not d or not (pr.get('time5K') or pr.get('time10K')):
+                continue
+            cur.execute(HEALTH_TOPUP_SQL, (user_id, d, None, pr.get('time5K'), pr.get('time10K'),
+                                           pr.get('timeHalfMarathon'), pr.get('timeMarathon'),
+                                           json.dumps({"race_predictions": pr})))
+            conn.commit()
+            m += 1
+        print(f"📈 Race predictor (legacy top-up): {m} hari")
+    except Exception as e:
+        conn.rollback()
+        print(f"   ✗ race predictor: {type(e).__name__}: {str(e)[:100]}")
+    cur.close()
+
 def pa_sync_health(conn, user_id, token, days):
     """Health harian via Personal API (endpoint resmi, DTO sama dgn jalur legacy):
     HRV /hrv-service/hrv/{d} (hrvSummary.lastNightAvg), Sleep /sleep-service/sleep/dailySleep?date=,
@@ -834,6 +898,8 @@ def main():
                 hd = 30 if last is None else min(30, max(7, (_dt.date.today() - last).days + 1))
             n = pa_sync_health(conn, user_id, token, hd)
             print(f"❤️  Health daily (Personal API): {n} hari (jendela {hd}, user_id={user_id})")
+            # VO2max + race predictor tak tersedia di PA → top-up legacy bila kredensial ada
+            pa_health_legacy_topup(conn, user_id, hd)
             if not (args.days or args.details):
                 conn.close()
                 print("✅ Selesai")

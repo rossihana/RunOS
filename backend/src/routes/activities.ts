@@ -342,8 +342,12 @@ router.post('/garmin/internal-creds', catchAsync(async (req: Request, res: Respo
   // Migrasi Fase 2: user dengan Personal API key → kirim api_key (bukan kredensial legacy)
   const apiKey = await m.loadGarminApiKey(uid);
   if (apiKey) {
+    // Opsional A: akun yang masih menyimpan kredensial legacy (owner) ikut kirim —
+    // untuk top-up VO2max/race predictor (PA tidak menyediakan). User PA-only tanpa
+    // legacy → field ini absen → script melewati top-up.
+    const legacy = await m.loadCredentials(uid);
     res.set('Cache-Control', 'no-store');
-    return res.json({ api_key: apiKey.apiKey });
+    return legacy ? res.json({ api_key: apiKey.apiKey, legacy }) : res.json({ api_key: apiKey.apiKey });
   }
   const creds = await m.loadCredentials(uid);
   if (!creds) return res.status(404).json({ error: 'kredensial tidak ada' });
