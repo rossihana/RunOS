@@ -661,6 +661,60 @@ ON CONFLICT (user_id, date) DO UPDATE SET
   raw = EXCLUDED.raw;
 """
 
+def pa_sync_health(conn, user_id, token, days):
+    """Health harian via Personal API (endpoint resmi, DTO sama dgn jalur legacy):
+    HRV /hrv-service/hrv/{d} (hrvSummary.lastNightAvg), Sleep /sleep-service/sleep/dailySleep?date=,
+    RHR /wellness-service/wellness/dailyHeartRate?date= (restingHeartRate),
+    Stress /usersummary-service/stats/stress/daily/{from}/{to} (values.overallStressLevel).
+    VO2max harian & race predictor TIDAK tersedia di PA → NULL (COALESCE pertahankan nilai lama)."""
+    import datetime
+    cur = conn.cursor()
+    cur.execute(HEALTH_TABLE_SQL)
+    conn.commit()
+    today = datetime.date.today()
+    stress_by_date = {}
+    try:
+        st = pa_get(token, f"/usersummary-service/stats/stress/daily/{(today - datetime.timedelta(days=days - 1)).isoformat()}/{today.isoformat()}") or []
+        for row in st:
+            stress_by_date[row.get('calendarDate')] = (row.get('values') or {}).get('overallStressLevel')
+        print(f"😰 Stress: {len(stress_by_date)} hari")
+    except Exception as e:
+        print(f"   ✗ stress: {type(e).__name__}: {str(e)[:100]}")
+    n = 0
+    for i in range(days):
+        d = (today - datetime.timedelta(days=i)).isoformat()
+        try:
+            hrv = pa_get(token, f"/hrv-service/hrv/{d}") or {}
+            hrv_val = (hrv.get("hrvSummary") or {}).get("lastNightAvg")
+            sl = pa_get(token, f"/sleep-service/sleep/dailySleep?date={d}") or {}
+            dto = sl.get("dailySleepDTO") or sl
+            sleep_val = (dto.get("sleepTimeSeconds") or 0) / 3600.0
+            sleep_score_val = ((dto.get("sleepScores") or {}).get("overall") or {}).get("value")
+            rhr_val = None
+            try:
+                rhr_val = (pa_get(token, f"/wellness-service/wellness/dailyHeartRate?date={d}") or {}).get("restingHeartRate")
+            except Exception:
+                pass
+            stress_val = stress_by_date.get(d)
+            # guard: hari tanpa data sama sekali → jangan upsert (upsert menimpa
+            # hrv/sleep/rhr dgn EXCLUDED; NULL akan menghapus nilai lama)
+            if hrv_val is None and sleep_val == 0 and rhr_val is None:
+                continue
+            cur.execute(HEALTH_UPSERT_SQL, (
+                user_id, d, hrv_val, sleep_score_val, None, None, None, rhr_val,
+                None, None, None, None,
+                json.dumps({"hrv": hrv, "sleep": dto, "vo2max": None, "stress": stress_val}),
+            ))
+            conn.commit()
+            n += 1
+            time.sleep(1.0)  # jangan banting Garmin (429)
+        except Exception as e:
+            conn.rollback()
+            print(f"   ✗ {d}: {type(e).__name__}: {str(e)[:100]}")
+    cur.close()
+    print(f"❤️  {n}/{days} hari health tersimpan via Personal API (user_id={user_id})")
+    return n
+
 def sync_health(conn, user_id, c, days):
     """Sync data health harian -> health_daily. Client c sudah login & conn milik main (jangan ditutup di sini)."""
     import datetime
@@ -765,10 +819,25 @@ def main():
         and not os.environ.get("GARMIN_EMAIL")
     )
     if want_personal and not args.verify_only:
-        if args.health:
-            print("⚠️  --health belum tersedia di jalur Personal API (Fase lanjutan) — dilewati")
         conn = get_db()
         user_id = get_user_id(conn, args.user_id)
+        if args.health:
+            token = mint_pa_token(need("GARMIN_PERSONAL_KEY"))
+            hd = args.health_days
+            if not hd:
+                # jendela auto (sama dgn jalur legacy): belum pernah → 30; fresh → 7; basi → max 30
+                import datetime as _dt
+                cur0 = conn.cursor()
+                cur0.execute("SELECT MAX(date) FROM health_daily WHERE user_id = %s", (user_id,))
+                last = cur0.fetchone()[0]
+                cur0.close()
+                hd = 30 if last is None else min(30, max(7, (_dt.date.today() - last).days + 1))
+            n = pa_sync_health(conn, user_id, token, hd)
+            print(f"❤️  Health daily (Personal API): {n} hari (jendela {hd}, user_id={user_id})")
+            if not (args.days or args.details):
+                conn.close()
+                print("✅ Selesai")
+                return
         pa_run_sync(args, user_id, conn)
         conn.close()
         print("✅ Selesai (Personal API)")

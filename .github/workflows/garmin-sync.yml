@@ -131,6 +131,7 @@ jobs:
           # prioritas jalur personal: input backend=personal ATAU user punya API key (dari internal-creds)
           if [ "${{ inputs.backend }}" = "personal" ] || [ "${{ env.USE_PERSONAL }}" = "1" ]; then
             extra="$extra --personal"
+            [ "${{ inputs.health }}" = "true" ] && extra="$extra --health"
           elif [ "${{ inputs.health }}" = "true" ]; then
             extra="$extra --health"
           fi
