@@ -204,7 +204,11 @@ def pa_fit_to_streams(fit_path):
                     "split": lap_no,
                     "distance": float(f['total_distance']),
                     "duration": float(f.get('total_elapsed_time') or 0),
-                    "average_speed": float(f['avg_speed']) if f.get('avg_speed') is not None else None,
+                    # field lap bernama enhanced_avg_speed (bukan avg_speed) — fallback hitung manual
+                    "average_speed": (float(f['enhanced_avg_speed']) if f.get('enhanced_avg_speed') is not None
+                                      else float(f['avg_speed']) if f.get('avg_speed') is not None
+                                      else round(float(f['total_distance']) / float(f['total_elapsed_time']), 3)
+                                      if f.get('total_elapsed_time') else None),
                     "average_heartrate": float(f['avg_heart_rate']) if f.get('avg_heart_rate') is not None else None,
                 })
     streams = {k: {"data": v} for k, v in streams.items()}
