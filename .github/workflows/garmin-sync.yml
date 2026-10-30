@@ -167,8 +167,9 @@ jobs:
                 export GARMIN_EMAIL="$legacy_email" GARMIN_PASSWORD="$legacy_pass"
               fi
               # --personal eksplisit: GARMIN_EMAIL ter-export tidak boleh membalik jalur ke legacy
+              # --health: VO2max/race predictor (top-up legacy) + wellness PA — WAJIB harian utk owner
               GARMIN_PERSONAL_KEY=$api_key \
-                python scripts/garmin_sync.py --user-id "$uid" --days 7 --details --max-detail 30 --personal \
+                python scripts/garmin_sync.py --user-id "$uid" --days 7 --details --max-detail 30 --personal --health \
                 || failed=1
               continue
             fi
