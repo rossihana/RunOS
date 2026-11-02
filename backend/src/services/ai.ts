@@ -38,18 +38,24 @@ export { openai };
 // Sejak 09-08: tiap fitur bisa punya model sendiri + user bisa menambah provider
 // sendiri (OpenAI-compatible: base URL + API key) — lihat getAISettings/resolveForFeature.
 
-export const DEFAULT_MODEL = "gemini/gemini-3.8-flash";
-// Channel sehat hasil probe 09-07: 3.8 bersih & cepat; 3.7/3.6 valid tapi kerap
-// menambah postamble (ditangani extractJson); 2.5-flash & gemma-4 rusak/503.
-export const FALLBACK_MODELS = ["gemini/gemini-3.8-flash", "gemini/gemini-3.7-flash"];
+export const DEFAULT_MODEL = "gemini/gemini-3.6-flash";
+// Rantai fallback (01-11): 3.6 rusak/hang hari ini → 3.7 → 3-flash-preview →
+// openrouter free tier (9router) sebagai jaring terakhir.
+export const FALLBACK_MODELS = [
+  "gemini/gemini-3.6-flash",
+  "gemini/gemini-3.7-flash",
+  "gemini/gemini-3-flash-preview",
+  "openrouter/openrouter/free",
+];
 
 // ─── Katalog model GRATIS untuk user tanpa provider sendiri (S2, 09-09) ───
 // Semua lewat 9router pemilik app; glm-5.3-flash DISENGJAJA dikecualikan
 // (eksklusif untuk pemilik). Probe 09-09: qwen3.8-flash cepat & solid (1.1s),
 // hy3 bisa return kosong tanpa max_tokens (wajib set max_tokens),
-// mimo-v2.5 lambat (7-21s) tapi berfungsi.
-export const FREE_MODELS = ["kios-ai/muse-spark-1.3-contributor", "b-ai/qwen3.8-flash", "b-ai/hy3", "b-ai/mimo-v2.5"];
-export const FREE_DEFAULT_MODEL = "kios-ai/muse-spark-1.3-contributor";
+// mimo-v2.5 lambat (7-21s) tapi berfungsi. 01-11: namespace kios-ai/b-ai lenyap
+// dari 9router → FREE_MODELS dinormalisasi ke gemini-3.6-flash + openrouter free.
+export const FREE_MODELS = ["gemini/gemini-3.6-flash", "gemini/gemini-3.7-flash", "openrouter/openrouter/free"];
+export const FREE_DEFAULT_MODEL = "gemini/gemini-3.6-flash";
 // ":free" suffix = OpenRouter free tier — lewat 9router pemilik app, BUKAN BYOK user.
 export const FREE_HOSTED_PREFIXES = ["openrouter/"];
 /** Email pemilik app — bebas pakai semua model termasuk glm-5.3-flash. */
