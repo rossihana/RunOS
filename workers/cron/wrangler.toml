@@ -1,0 +1,9 @@
+name = "runos-cron"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# 09:00 & 21:00 WIB (UTC+7, tanpa DST) — TEPAT waktu.
+# Latar: GHA schedule sendiri sering tertunda berjam-jam / slot dibuang saat
+# antrean padat; workflow_dispatch (event) tidak melalui scheduler itu.
+[triggers]
+crons = ["0 2 * * *", "0 14 * * *"]
