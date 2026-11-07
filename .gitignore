@@ -35,3 +35,4 @@ logo-redesign/logo-open-track/renders/
 scripts/.garmin_fit/
 scripts/.tmp_fit_test*/
 .dev.vars
+workers/cron/.wrangler/
