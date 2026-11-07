@@ -18,6 +18,8 @@ async function dispatch(env: Env): Promise<void> {
   const r = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/garmin-sync.yml/dispatches`, {
     method: 'POST',
     headers: {
+      // GitHub API mewajibkan User-Agent — fetch di Workers tidak menambahkannya otomatis
+      'User-Agent': 'RunOS-Cron/1.0',
       Authorization: `Bearer ${env.GITHUB_SYNC_PAT}`,
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
